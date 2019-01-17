@@ -44,6 +44,7 @@
 
 
 #define EMCC
+#define BAC_OPTIONS
 #define GIAC_NO_OPTIMIZATIONS
 #define HAVE_NO_HOME_DIRECTORY
 
@@ -56,3 +57,4 @@
 #define TIMEOUT
 #define HAVE_UNISTD_H
 //#define HAVE_SYS_TIMES_H 1
+#define HAVE_SSTREAM 1

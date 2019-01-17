@@ -45,12 +45,14 @@ using namespace std;
 #include "vector.h"
 #include <algorithm>
 #include <cmath>
+#include "emscripten.h"
 
 // C headers
 #include <stdio.h>
 #ifndef __VISUALC__ 
 #if !defined RTOS_THREADX && !defined BESTA_OS && !defined FREERTOS
 #include <fcntl.h>
+#include <limits.h>
 #endif
 #endif // __VISUALC__
 
@@ -883,7 +885,11 @@ namespace giac {
     }
   }
 
+#ifdef BAC_OPTIONS
+  vecteur quote_eval_plot_option(const vecteur & v,const vecteur & quoted,const bool called_by_plot,GIAC_CONTEXT){
+#else
   vecteur quote_eval(const vecteur & v,const vecteur & quoted,GIAC_CONTEXT){
+#endif
     /*
       vecteur l(quoted);
       lidnt(v,l);
@@ -936,7 +942,7 @@ namespace giac {
 	    }
 	  }
 	}
-	if (!done){
+	if (!done) {
 #if 0
 	  vecteur lv=lidnt(v[i]);
 	  vecteur lw(lv);
@@ -947,8 +953,17 @@ namespace giac {
 	  }
 	  res[i]=quotesubst(v[i],lv,lw,contextptr); // otherwise plots with if else fails (error not catched with emscripten)
 #endif
-	  res[i]=eval(v[i],contextptr); 
-	}
+#ifdef BAC_OPTIONS
+          if(called_by_plot) {
+            vecteur lv = lidnt(v[i]);
+            vecteur lw(lv);
+            for(int j=0; j<int(lw.size());++j)
+              lw[j] = eval(lv[j], contextptr);
+            res[i] = quotesubst(v[i], lv, lw, contextptr);
+          } else
+#endif
+          res[i]=eval(v[i],contextptr);
+        }
 #ifndef NO_STDEXCEPT
       } catch (std::runtime_error & ){
 	last_evaled_argptr(contextptr)=NULL;
@@ -972,12 +987,17 @@ namespace giac {
     }
     return res;
   }
+#ifdef BAC_OPTIONS
+  vecteur quote_eval(const vecteur & v,const vecteur & quoted,GIAC_CONTEXT){
+    return quote_eval_plot_option(v, quoted, false, contextptr);
+  }
+#endif
 
   // args -> vector
   // add vx_var if args is not a seq
   // evaluate v[1], if it's not an idnt or a vector of idnt keep v[1]
   // evaluate v with v[1] quoted
-  vecteur plotpreprocess(const gen & args,GIAC_CONTEXT){
+  vecteur plotpreprocess_eval(const gen & args,const bool do_quote_eval, GIAC_CONTEXT){
     vecteur v;
     if (args.type==_FUNC)
       return makevecteur(args(vx_var,contextptr),vx_var);
@@ -1005,7 +1025,14 @@ namespace giac {
       plotpreprocess(v[1]._SYMBptr->feuille._VECTptr->front(),quoted,contextptr);
     else
       plotpreprocess(v[1],quoted,contextptr);
-    return quote_eval(v,quoted,contextptr);
+#ifdef BAC_OPTIONS
+    return quote_eval_plot_option(v,quoted,!do_quote_eval, contextptr);
+#else
+    return quote_eval(v,quoted, contextptr);
+#endif
+  }
+  vecteur plotpreprocess(const gen & args,GIAC_CONTEXT){
+    return plotpreprocess_eval(args, true, contextptr);
   }
 
   gen pnt_attrib(const gen & point,const vecteur & attributs,GIAC_CONTEXT){
@@ -1223,10 +1250,152 @@ namespace giac {
     else
       i.localvalue->back() += value;
   }
+  void local_sto(const gen & value,const identificateur & i,GIAC_CONTEXT){
+    if (contextptr)
+      (*contextptr->tabptr)[i.id_name]=value;
+    else 
+      i.localvalue->back()=value;
+  }
+
+  void local_sto_increment(const gen & value,const identificateur & i,GIAC_CONTEXT){
+    if (contextptr)
+      (*contextptr->tabptr)[i.id_name] += value;
+    else
+      i.localvalue->back() += value;
+  }
 
   double max_nstep=2e4;
+#ifdef BAC_OPTIONS
 
+  template<typename T = double>
+  class Logspace {
+  private:
+    T curValue, step;
+
+  public:
+    Logspace(T first, T last, int num) : curValue(first) {
+      step = (last - first)/(num-1);
+    }
+
+    T operator()() {
+      T retval = std::pow(10, curValue);
+      curValue += step;
+      return retval;
+    }
+  };
+  std::vector<double> genLogspace(double start, double stop, int num = 50) {
+    double realStart = std::log10(start);
+    double realStop = std::log10(stop);
+
+    std::vector<double> retval;
+    retval.reserve(num);
+    std::generate_n(std::back_inserter(retval), num, Logspace<>(realStart,realStop,num));
+    return retval;
+  }
+
+  template<typename T = double>
+  class Linspace {
+  private:
+    T curValue, step;
+
+  public:
+    Linspace(T first, T last, int num) : curValue(first) {
+      step = (last - first)/(num-1);
+    }
+
+    T operator()() {
+      T retval = curValue;
+      curValue += step;
+      return retval;
+    }
+  };
+  std::vector<double> genLinspace(double start, double stop, int num = 50) {
+    std::vector<double> retval;
+    retval.reserve(num);
+    std::generate_n(std::back_inserter(retval), num, Linspace<>(start,stop,num));
+    return retval;
+  }
+  
+  void insert_to_array(double *x_vals, double *y_vals, int *indeces, bool *defined, const int insert, const int length) {
+    double x_to_insert = x_vals[length-1];
+    double y_to_insert = y_vals[length-1];
+    int i_to_insert = indeces[length-1];
+    bool d_to_insert = defined[length-1];
+    for(int count = (length-1); count > (insert+1); count--) {
+      x_vals[count] = x_vals[count - 1];
+      y_vals[count] = y_vals[count - 1];
+      indeces[count] = indeces[count - 1];
+      defined[count] = defined[count - 1];
+    }
+    x_vals[insert+1] = x_to_insert;
+    y_vals[insert+1] = y_to_insert;
+    indeces[insert+1] = i_to_insert;
+    defined[insert+1] = d_to_insert;
+  }
+  // Not true y_prime, but absolute value of the percieved slope as shown on the plot, so log axes matter!
+  double y_prime(const double *x, const double *y, const bool *d, const int i, const int count, const bool logx, const bool logy) {
+    if(i == 0) {
+      // Start position
+      if(!d[0] || !d[1]) return 0;
+      if(logx && logy)
+        return std::abs(std::log10(y[1])-std::log10(y[0]))/(std::log10(x[1])-std::log10(x[0]));
+      else if(logy)
+        return std::abs(std::log10(y[1])-std::log10(y[0]))/(x[1]-x[0]);
+      else if(logx)
+        return std::abs(y[1]-y[0])/(std::log10(x[1])-std::log10(x[0]));
+      else
+        return std::abs(y[1]-y[0])/(x[1]-x[0]);
+    } if(i == (count-1)) {
+      // end position
+      if(!d[i] || !d[i-1]) return 0;
+      if(logx && logy)
+        return std::abs(std::log10(y[i])-std::log10(y[i-1]))/(std::log10(x[i])-std::log10(x[i-1]));
+      else if(logy)
+        return std::abs(std::log10(y[i])-std::log10(y[i-1]))/(x[i]-x[i-1]);
+      else if(logx)
+        return std::abs(y[i]-y[i-1])/(std::log10(x[i])-std::log10(x[i-1]));
+      else
+        return std::abs(y[i]-y[i-1])/(x[i]-x[i-1]);
+    }
+    if(!d[i]) return 0;
+    if(!d[i-1] && !d[i+1]) return 0;
+    if(!d[i-1]) {
+      if(logx && logy)
+        return std::abs(std::log10(y[i+1])-std::log10(y[i]))/(std::log10(x[i+1])-std::log10(x[i]));
+      else if(logy)
+        return std::abs(std::log10(y[i+1])-std::log10(y[i]))/(x[i+1]-x[i]);
+      else if(logx)
+        return std::abs(y[i+1]-y[i])/(std::log10(x[i+1])-std::log10(x[i]));
+      else
+        return std::abs(y[i+1]-y[i])/(x[i+1]-x[i]);
+    }
+    if(!d[i+1]) {
+      if(logx && logy)
+        return std::abs(std::log10(y[i])-std::log10(y[i-1]))/(std::log10(x[i])-std::log10(x[i-1]));
+      else if(logy)
+        return std::abs(std::log10(y[i])-std::log10(y[i-1]))/(x[i]-x[i-1]);
+      else if(logx)
+        return std::abs(y[i]-y[i-1])/(std::log10(x[i])-std::log10(x[i-1]));
+      else
+        return std::abs(y[i]-y[i-1])/(x[i]-x[i-1]);
+    }
+    if(logx && logy)
+      return 0.5*std::abs(std::log10(y[i+1])-std::log10(y[i]))/(std::log10(x[i+1])-std::log10(x[i])) + 0.5*std::abs(std::log10(y[i+1])-std::log10(y[i]))/(std::log10(x[i+1])-std::log10(x[i]));
+    else if(logy)
+      return 0.5*std::abs(std::log10(y[i+1])-std::log10(y[i]))/(x[i+1]-x[i]) + 0.5*std::abs(std::log10(y[i+1])-std::log10(y[i]))/(x[i+1]-x[i]);
+    else if(logx)
+      return 0.5*std::abs(y[i+1]-y[i])/(std::log10(x[i+1])-std::log10(x[i])) + 0.5*std::abs(y[i+1]-y[i])/(std::log10(x[i+1])-std::log10(x[i]));
+    else
+      return 0.5*std::abs(y[i+1]-y[i])/(x[i+1]-x[i]) + 0.5*std::abs(y[i+1]-y[i])/(x[i+1]-x[i]);
+  }
+
+  gen plotfunc(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_zmin, double function_zmax,int nstep,int jstep,bool showeq,const context * contextptr){
+    return plotfunc(f,vars,attributs,false,false,zero,plus_one,densityplot,function_xmin,function_xmax,function_ymin,function_ymax,function_zmin,function_zmax,nstep,jstep,showeq,contextptr);
+  }
+  gen plotfunc(const gen & f_,const gen & vars,const vecteur & attributs,const bool logx, const bool logy, const gen & x_offset, const gen & x_unit, bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_zmin, double function_zmax,int nstep,int jstep,bool showeq,const context * contextptr){
+#else
   gen plotfunc(const gen & f_,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_zmin, double function_zmax,int nstep,int jstep,bool showeq,const context * contextptr){
+#endif    
     gen f=when2piecewise(f_,contextptr);
     f=Heavisidetopiecewise(f,contextptr); 
     double step=(function_xmax-function_xmin)/nstep;
@@ -1252,7 +1421,11 @@ namespace giac {
 	vecteur cur_attributs(1,vattribut[i]);
 	if (attributs.size()>1 && attributs[1].type==_VECT && attributs[1]._VECTptr->size()>i)
 	  cur_attributs.push_back((*attributs[1]._VECTptr)[i]);
+#ifdef BAC_OPTIONS
+  gen tmp=plotfunc(vf[i],vars,cur_attributs,logx, logy, x_offset, x_unit, false,function_xmin,function_xmax,function_ymin,function_ymax,function_zmin,function_zmax,nstep,jstep,showeq,contextptr);
+#else
 	gen tmp=plotfunc(vf[i],vars,cur_attributs,false,function_xmin,function_xmax,function_ymin,function_ymax,function_zmin,function_zmax,nstep,jstep,showeq,contextptr);
+#endif
 	if (tmp.type==_VECT) 
 	  res=mergevecteur(res,*tmp._VECTptr);
 	else
@@ -1261,7 +1434,7 @@ namespace giac {
       return res; // gen(res,_SEQ__VECT);
     }
 #ifndef GNUWINCE
-    if (vars.type==_IDNT){ // function plot
+    if (vars.type==_IDNT) { // function plot
       gen a,b;
       if (taille(f,100)<=100 && is_linear_wrt(f,vars,a,b,contextptr))	
 	return put_attributs(_segment(makesequence(function_xmin+cst_i*(a*gen(function_xmin)+b),function_xmax+cst_i*(a*gen(function_xmax)+b)),contextptr),attributs,contextptr);
@@ -1356,25 +1529,483 @@ namespace giac {
       } // end piecewise
       gen locvar(vars);
       locvar.subtype=0;
+      context * newcontextptr= clone_context(contextptr);
+#ifdef BAC_OPTIONS
+      remove_angle_mode(true);
+      purgenoassume(locvar,newcontextptr);
+      gen y=quotesubst(f,vars,gen(identificateur("x__temp")),contextptr),yy;
+      local_sto(locvar * x_unit,identificateur("x__temp"),newcontextptr);
+      y = evalf(y, eval_level(contextptr),newcontextptr);
+      bool do_mksa = false;
+      if(is_undef(y) || _usimplify_hits_temperature(y,newcontextptr) || _test_for_sommet(f, at_local)) {
+        y=quotesubst(f,vars,locvar,contextptr);
+        do_mksa = true;
+      } else 
+        y = simplify(mksa_value(y,contextptr),newcontextptr);
+#else
       gen y=quotesubst(f,vars,locvar,contextptr),yy;
+#endif
       // gen y=f.evalf2double(),yy;
       double j,entrej,oldj=0,xmin=function_xmin,xmax=function_xmax+step/2;
+#ifdef BAC_OPTIONS
+      std::vector<double> i_vals;
+      double i, ii, i_no_offset;
+      double x_offset_d = x_offset.evalf2double(eval_level(contextptr),contextptr)._DOUBLE_val;
+      if(logx) {
+        if(xmin <= 0) {
+          remove_angle_mode(false);
+          return gensizeerr(gettext("Log plot error: x limits must be positive, provided x_min is ")+print_DOUBLE_(function_xmin,12)+".");
+          }
+        i_vals = genLogspace(xmin, function_xmax, nstep+1);
+      } else
+        i_vals = genLinspace(xmin, function_xmax, nstep+1);
+#else
+      double i, ii;
+#endif
+      ii=xmin;
       bool joindre;
       vecteur localvar(1,vars);
-      context * newcontextptr= (context *) contextptr;
       int protect=giac::bind(vecteur(1,xmin),localvar,newcontextptr);
       vecteur chemin;
-      double i=xmin;
-      for (;i<xmax;i+= step){
-	// yy=evalf_double(subst(f,vars,i,false,contextptr),1,contextptr);
-	local_sto_double(i,*vars._IDNTptr,newcontextptr);
-	// vars._IDNTptr->localvalue->back()._DOUBLE_val =i;
+
+#ifdef BAC_OPTIONS
+      // Indeces will be my ordered points, and will point to the index in res where the point lives (res wont be in order)
+      int indeces[nstep+1];
+      double x_vals[nstep+1];
+      double y_vals[nstep+1];
+      bool defined[nstep+1];
+      double y_max = -1*std::numeric_limits<double>::max();
+      double y_min = std::numeric_limits<double>::max();
+      double bound_code = 1791.583; // Hack...this specific value means the ymin is NOT defined by user
+      bool y_min_provided = std::abs(bound_code - function_zmin) > 1e-10;
+      bool y_max_provided = std::abs(bound_code - function_zmax) > 1e-10;
+      // Seed the indeces:
+      int counter = 0;
+      int count = 0;
+      bool all_undefined = true;
+      double big = 10;
+      double max_curvature = 0.1736; // sin 10 degrees
+      bool check_y_max = false;
+      bool check_y_min = false;
+      double range_y_max = std::numeric_limits<double>::max();
+      double range_y_min = -1*std::numeric_limits<double>::max();
+      // Check_y_max and check_y_min called if we havent been given y bounds as an input.  In that case
+      // we are generating the plot and setting y range based on the provided window.  Since we want to 
+      // trim asymptotes/singularities from the range to make the plot window look like something, we
+      // need to only set max/min values if they are within a reasonable range.  To do this, we check
+      // the slope of the line at the suggested max/min point, and if its less than a multiple of 5
+      // of the current window diagonal slope, we accept, otherwise we reject since it looks like its 
+      // blowing up.  Keeping track of the ymax/ymin range is necessary for the adaptive sampling routine,
+      // as it will stop sampling below the window resolution, and we have to know the plotted range to 
+      // determine what that resolution is.  So I apologize for all this, its ugles, but it works.
+      while(true) {
+        x_vals[counter] = i_vals[count];
+        defined[counter] = true;
+        if(do_mksa) {
+          local_sto((i_vals[count] + x_offset_d) * x_unit,*vars._IDNTptr,newcontextptr);
+          yy = evalf2double_nock(mksa_value(y.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+        } else {
+          local_sto(i_vals[count] + x_offset_d,*vars._IDNTptr,newcontextptr);
+          yy = evalf2double_nock(y,eval_level(contextptr),newcontextptr);
+        }
+        if (yy.type!=_DOUBLE_){
+          // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+          if((yy.type == _CPLX) && is_greater(abs(re(yy,contextptr),contextptr),abs(im(yy,contextptr)*1e10,contextptr),contextptr)) {
+            y_vals[counter] = re(yy, contextptr)._DOUBLE_val;
+            all_undefined = false;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          else 
+            defined[counter] = false;
+        } else {
+          y_vals[counter] = yy._DOUBLE_val;
+          all_undefined = false;
+          if(y_vals[counter] > y_max) y_max = y_vals[counter];
+          if(y_vals[counter] < y_min) y_min = y_vals[counter];
+        }
+        indeces[counter++] = count;
+        if(count == nstep) break;
+        count += (int)(nstep/20. * (std_rand()*0.5/RAND_MAX+0.75)); // slight randomness here to help get through periodic functions where aliasing could throw everything off
+        if(count > nstep) count = nstep;
+      }
+      if(!all_undefined) {
+        // Start the adaptive sampling tests to fill in areas of high curvature:
+        // First we need to determine ymax/ymin for range finding if they aren't provided in input:
+        int last_y_max_index = -1;
+        int last_y_min_index = -1;
+        if(!y_max_provided || !y_min_provided) {
+          while(true) {
+            // Find max/min
+            double find_y_min = std::numeric_limits<double>::max();
+            double find_y_max = -1*std::numeric_limits<double>::max();
+            int i_min, i_max;
+            for(int i = 0; i < counter; i++) {
+              if(i!=last_y_min_index && defined[i] && y_vals[i]>range_y_min && y_vals[i]<find_y_min) { find_y_min = y_vals[i]; i_min = i; }
+              if(i!=last_y_max_index && defined[i] && y_vals[i]<range_y_max && y_vals[i]>find_y_max) { find_y_max = y_vals[i]; i_max = i; }
+            }
+            double delta;
+            if(logx && logy)
+              delta = (std::log10(y_max_provided ? function_ymax : find_y_max) - std::log10(y_min_provided ? function_ymin : find_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+            else if(logy)
+              delta = (std::log10(y_max_provided ? function_ymax : find_y_max) - std::log10(y_min_provided ? function_ymin : find_y_min)) / (function_xmax - function_xmin);
+            else if(logx)
+              delta = ((y_max_provided ? function_ymax : find_y_max) - (y_min_provided ? function_ymin : find_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+            else
+              delta = ((y_max_provided ? function_ymax : find_y_max) - (y_min_provided ? function_ymin : find_y_min)) / (function_xmax - function_xmin);
+            bool repeat = false;
+            if(!y_max_provided && y_prime(x_vals, y_vals, defined, i_max, counter, logx, logy)/delta > big) {
+              repeat = true;
+              last_y_max_index = i_max;
+            }
+            if(!y_min_provided && y_prime(x_vals, y_vals, defined, i_min, counter, logx, logy)/delta > big) {
+              repeat = true;
+              last_y_min_index = i_min;
+            }
+            range_y_max = find_y_max;
+            range_y_min = find_y_min;
+            if(!repeat) break;
+          }
+        }
+
+        int current_index = 1;
+        while(true) {
+          if((current_index+2) > counter) break; // DONE!
+          int ip, i0, in;
+          ip = indeces[current_index-1];
+          i0 = indeces[current_index];
+          in = indeces[current_index+1];
+          // Is first or second y value undefined?  If so, add value between first and second point
+          if(!defined[current_index-1] || !defined[current_index]) {
+            if((i0-ip) == 1) { // Already at max resolution...move along!
+              current_index++;
+              continue;
+            }
+            int newi = (i0 + ip)/2;
+            x_vals[counter] = i_vals[newi];
+            defined[counter] = true;
+            if(do_mksa) {
+              local_sto((i_vals[newi] + x_offset_d) * x_unit,*vars._IDNTptr,newcontextptr);
+              yy = evalf2double_nock(mksa_value(y.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              local_sto((i_vals[newi] + x_offset_d),*vars._IDNTptr,newcontextptr);
+              yy = evalf2double_nock(y,eval_level(contextptr),newcontextptr);
+            }
+            if (yy.type!=_DOUBLE_){
+              if((yy.type == _CPLX) && is_greater(abs(re(yy,contextptr),contextptr),abs(im(yy,contextptr)*1e10,contextptr),contextptr)) {
+                y_vals[counter] = re(yy, contextptr)._DOUBLE_val;
+                if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+                if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+              }
+              else 
+                defined[counter] = false;
+            } else {
+              y_vals[counter] = yy._DOUBLE_val;
+              if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+              if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+            }
+            indeces[counter++] = newi;
+            insert_to_array(x_vals, y_vals, indeces, defined, current_index-1, counter);
+            if(check_y_max) {
+              double delta;
+              if(logx && logy)
+                delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else if(logy)
+                delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+              else if(logx)
+                delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else
+                delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+              if(y_prime(x_vals, y_vals, defined, current_index-1, counter, logx, logy)/delta <= big) range_y_max = y_vals[current_index-1];
+              check_y_max = false;
+            }
+            if(check_y_min) {
+              double delta;
+              if(logx && logy)
+                delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else if(logy)
+                delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (function_xmax - function_xmin);
+              else if(logx)
+                delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else
+                delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (function_xmax - function_xmin);
+              if(y_prime(x_vals, y_vals, defined, current_index-1, counter, logx, logy)/delta <= big) range_y_min = y_vals[current_index-1];
+              check_y_min = false;
+            }
+            continue;
+          }
+          // Is third y value undefined?  If so, add value between second and third point
+          if(!defined[current_index+1]) {
+            if((in-i0) == 1) { // Already at max resolution...move along!
+              current_index++;
+              continue;
+            }
+            int newi = (in + i0)/2;
+            x_vals[counter] = i_vals[newi];
+            defined[counter] = true;
+            if(do_mksa) {
+              local_sto((i_vals[newi] + x_offset_d) * x_unit,*vars._IDNTptr,newcontextptr);
+              yy = evalf2double_nock(mksa_value(y.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              local_sto((i_vals[newi] + x_offset_d),*vars._IDNTptr,newcontextptr);
+              yy = evalf2double_nock(y,eval_level(contextptr),newcontextptr);
+            }
+            if (yy.type!=_DOUBLE_){
+              if((yy.type == _CPLX) && is_greater(abs(re(yy,contextptr),contextptr),abs(im(yy,contextptr)*1e10,contextptr),contextptr)) {
+                y_vals[counter] = re(yy, contextptr)._DOUBLE_val;
+                if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+                if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+              }
+              else 
+                defined[counter] = false;
+            } else {
+              y_vals[counter] = yy._DOUBLE_val;
+              if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+              if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+            }
+            indeces[counter++] = newi;
+            insert_to_array(x_vals, y_vals, indeces, defined, current_index, counter);
+            if(check_y_max) {
+              double delta;
+              if(logx && logy)
+                delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else if(logy)
+                delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+              else if(logx)
+                delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else
+                delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+              if(y_prime(x_vals, y_vals, defined, current_index, counter, logx, logy)/delta <= big) range_y_max = y_vals[current_index];
+              check_y_max = false;
+            }
+            if(check_y_min) {
+              double delta;
+              if(logx && logy)
+                delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else if(logy)
+                delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (function_xmax - function_xmin);
+              else if(logx)
+                delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (std::log10(function_xmax) - std::log10(function_xmin));
+              else
+                delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (function_xmax - function_xmin);
+              if(y_prime(x_vals, y_vals, defined, current_index, counter, logx, logy)/delta <= big) range_y_min = y_vals[current_index];
+              check_y_min = false;
+            }
+            continue;
+          }
+          // Woohoo! All values defined.  Now lets see if the curvature is acceptable;
+          double xp, x0, xn;
+          xp = x_vals[current_index-1];
+          x0 = x_vals[current_index];
+          xn = x_vals[current_index+1];
+          if(logx) {
+            xp = std::log10(xp);
+            x0 = std::log10(x0);
+            xn = std::log10(xn);
+          }
+          double yp, y0, yn, y_res;
+          yp = y_vals[current_index-1];
+          y0 = y_vals[current_index];
+          yn = y_vals[current_index+1];
+          double y_min_to_use, y_max_to_use;
+          if(!y_min_provided) {
+            y_min_to_use = range_y_min;
+          } else {
+            y_min_to_use = function_zmin - ((y_max_provided ? function_xmax : range_y_max) - function_zmin)*.25;
+            if((yp < y_min_to_use) && (y0 < y_min_to_use) && (yn < y_min_to_use)) {
+              //Outside visible window (dont do this check on range_y_min as its adaptive and could change)
+              current_index++;
+              continue;
+            }
+            y_min_to_use = function_zmin;
+          }
+          if(!y_max_provided) {
+            y_max_to_use = range_y_max;
+          } else {
+            y_max_to_use = function_zmax + (function_zmax - y_min_to_use)*.25;
+            if((yp > y_max_to_use) && (y0 > y_max_to_use) && (yn > y_max_to_use)) {
+              //Outside visible window (dont do this check on range_y_min as its adaptive and could change)
+              current_index++;
+              continue;
+            }
+            y_max_to_use = function_zmax;
+          } 
+          if(logy) {
+            yp = std::log10(yp);
+            y0 = std::log10(y0);
+            yn = std::log10(yn);
+            y_res = (std::log10(y_max_to_use) - std::log10(y_min_to_use)) / 300;
+          } else
+            y_res = (y_max_to_use - y_min_to_use) / 300;
+          if((y_res > 0) && (std::abs(y0-yp) < y_res) && (std::abs(y0-yn) < y_res) && (std::abs(yn-yp) < y_res)) {
+            // Changes are within window resolution, so no need to try and refine things.  Note that the range_y_max and range_y_min can change, 
+            // But they will only make the range larger, and therefore the resolution bigger...so we will never end up with an issue of undersampling
+            current_index++;
+            continue;
+          }
+          // Compute curvature:
+          double local_y_max = yp;
+          if(y0 > local_y_max){ local_y_max = y0; }
+          if(yn > local_y_max){ local_y_max = yn; }
+          double local_y_min = yp;
+          if(y0 < local_y_min){ local_y_min = y0; }
+          if(yn < local_y_min){ local_y_min = yn; }
+          double dx0 = (x0-xp)/(xn-xp);
+          double dx1 = (xn-x0)/(xn-xp);
+          double dy0 = (y0-yp)/(local_y_max-local_y_min);
+          double dy1 = (yn-y0)/(local_y_max-local_y_min);
+          double il0 = 1./std::sqrt(dx0*dx0 + dy0*dy0);
+          double il1 = 1./std::sqrt(dx1*dx1 + dy1*dy1);
+          double sinq = (dx0*dy1 - dy0*dx1) * il0 * il1;
+          if(fabs(sinq) > max_curvature) {
+            // Need to insert more points around where I am.  Insert a new point before me:
+            if(((i0-ip) == 1) && ((in-i0) == 1)) {
+              // Reached maximum resolution
+              current_index++;
+              continue;
+            } 
+            int index_change = 0;
+            if((i0-ip) > 1) { 
+              int newi = (i0 + ip)/2;
+              x_vals[counter] = i_vals[newi];
+              defined[counter] = true;
+              if(do_mksa) {
+                local_sto((i_vals[newi] + x_offset_d) * x_unit,*vars._IDNTptr,newcontextptr);
+                yy = evalf2double_nock(mksa_value(y.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              } else {
+                local_sto((i_vals[newi] + x_offset_d),*vars._IDNTptr,newcontextptr);
+                yy = evalf2double_nock(y,eval_level(contextptr),newcontextptr);
+              }
+              if (yy.type!=_DOUBLE_){
+                if((yy.type == _CPLX) && is_greater(abs(re(yy,contextptr),contextptr),abs(im(yy,contextptr)*1e10,contextptr),contextptr)) {
+                  y_vals[counter] = re(yy, contextptr)._DOUBLE_val;
+                  if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+                  if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+                }
+                else 
+                  defined[counter] = false;
+              } else {
+                y_vals[counter] = yy._DOUBLE_val;
+                if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+                if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+              }
+              indeces[counter++] = newi;
+              insert_to_array(x_vals, y_vals, indeces, defined, current_index-1, counter);
+              if(check_y_max) {
+                double delta;
+                if(logx && logy)
+                  delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else if(logy)
+                  delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+                else if(logx)
+                  delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else
+                  delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+                if(y_prime(x_vals, y_vals, defined, current_index-1, counter, logx, logy)/delta <= big) range_y_max = y_vals[current_index-1];
+                check_y_max = false;
+              }
+              if(check_y_min) {
+                double delta;
+                if(logx && logy)
+                  delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else if(logy)
+                  delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (function_xmax - function_xmin);
+                else if(logx)
+                  delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else
+                  delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (function_xmax - function_xmin);
+                if(y_prime(x_vals, y_vals, defined, current_index-1, counter, logx, logy)/delta <= big) range_y_min = y_vals[current_index-1];
+                check_y_min = false;
+              }
+              index_change = 1;
+            }
+            if((in-i0) > 1) { 
+              int newi = (in + i0)/2;
+              x_vals[counter] = i_vals[newi];
+              defined[counter] = true;
+              if(do_mksa) {
+                local_sto((i_vals[newi] + x_offset_d) * x_unit,*vars._IDNTptr,newcontextptr);
+                yy = evalf2double_nock(mksa_value(y.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              } else {
+                local_sto((i_vals[newi] + x_offset_d),*vars._IDNTptr,newcontextptr);
+                yy = evalf2double_nock(y,eval_level(contextptr),newcontextptr);
+              }
+              if (yy.type!=_DOUBLE_){
+                if((yy.type == _CPLX) && is_greater(abs(re(yy,contextptr),contextptr),abs(im(yy,contextptr)*1e10,contextptr),contextptr)) {
+                  y_vals[counter] = re(yy, contextptr)._DOUBLE_val;
+                  if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+                  if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+                }
+                else 
+                  defined[counter] = false;
+              } else {
+                y_vals[counter] = yy._DOUBLE_val;
+                if(y_vals[counter] > y_max) { y_max = y_vals[counter]; check_y_max = !y_max_provided; }
+                if(y_vals[counter] < y_min) { y_min = y_vals[counter]; check_y_min = !y_min_provided; }
+              }
+              indeces[counter++] = newi;
+              insert_to_array(x_vals, y_vals, indeces, defined, current_index+index_change, counter);
+              if(check_y_max) {
+                double delta;
+                if(logx && logy)
+                  delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else if(logy)
+                  delta = (std::log10(range_y_max) - std::log10(y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+                else if(logx)
+                  delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else
+                  delta = (range_y_max - (y_min_provided ? function_ymin : range_y_min)) / (function_xmax - function_xmin);
+                if(y_prime(x_vals, y_vals, defined, current_index+index_change, counter, logx, logy)/delta <= big) range_y_max = y_vals[current_index+index_change];
+                check_y_max = false;
+              }
+              if(check_y_min) {
+                double delta;
+                if(logx && logy)
+                  delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else if(logy)
+                  delta = (std::log10(y_max_provided ? function_ymax : range_y_max) - std::log10(range_y_min)) / (function_xmax - function_xmin);
+                else if(logx)
+                  delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (std::log10(function_xmax) - std::log10(function_xmin));
+                else
+                  delta = ((y_max_provided ? function_ymax : range_y_max) - range_y_min) / (function_xmax - function_xmin);
+                if(y_prime(x_vals, y_vals, defined, current_index+index_change, counter, logx, logy)/delta <= big) range_y_min = y_vals[current_index+index_change];
+                check_y_min = false;
+              }
+            }
+          } else
+            current_index++;
+        }
+      }
+      // Should have a nice array of numbers now.  Go ahead and build output array:
+      for(int count = 0; count < counter; count++) {
+        if(defined[count])
+          res.push_back(makevecteur(x_vals[count],y_vals[count]));
+        else
+          res.push_back(makevecteur(x_vals[count],plus_inf));
+        if((count > 0) && ((count+2)<counter)) {
+          if(defined[count-1] && defined[count] && defined[count+1] && defined[count+2]) {
+            // Test for asymptote
+            //TODO: CHANGE TO > or < yMax/5 yMin/5 instead of 0
+            if((y_vals[count] > (y_max/5)) && (y_vals[count] > y_vals[count-1]) && (y_vals[count+1] < (y_min/5)) && (y_vals[count+2] > y_vals[count+1]))
+              res.push_back(makevecteur((x_vals[count]+x_vals[count+1])/2,plus_inf));
+            if((y_vals[count] < (y_min/5)) && (y_vals[count] < y_vals[count-1]) && (y_vals[count+1] > (y_max/5)) && (y_vals[count+2] < y_vals[count+1]))
+              res.push_back(makevecteur((x_vals[count]+x_vals[count+1])/2,plus_inf));
+          }
+        }
+      }
+
+#else
+
+      for (;ii<xmax;ii+= step){
+        i = ii;
+        local_sto_double(i,*vars._IDNTptr,newcontextptr);
 	yy=y.evalf2double(eval_level(contextptr),newcontextptr);
 	if (yy.type!=_DOUBLE_){
 	  if (debug_infolevel)
 	    CERR << y << " not real at " << i << " " << yy << endl;
-	  if (!chemin.empty())
-	    res.push_back(pnt_attrib(symb_curve(gen(makevecteur(vars+cst_i*f,vars,xmin,i,showeq),_PNT__VECT),gen(chemin,_GROUP__VECT)),attributs.empty()?color:attributs,contextptr));
+          if (!chemin.empty()) {
+            res.push_back(pnt_attrib(symb_curve(gen(makevecteur(vars+cst_i*f,vars,xmin,i,showeq),_PNT__VECT),gen(chemin,_GROUP__VECT)),attributs.empty()?color:attributs,contextptr));
+          }
 	  xmin=i;
 	  chemin.clear();
 	  continue;
@@ -1385,12 +2016,12 @@ namespace giac {
 	if (j<function_ymin)
 	  function_ymin=j;
 	if (i!=xmin){
-	  if (fabs(oldj-j)>(function_ymax-function_ymin)/5){ // try middle-pnt
-	    if (debug_infolevel)
+    if (fabs(oldj-j)>(function_ymax-function_ymin)/5) { // try middle-pnt
+      if (debug_infolevel)
 	      CERR << y << " checking step at " << i << " " << yy << endl;
 	    local_sto_double_increment(-step/2,*vars._IDNTptr,newcontextptr);
-	    // vars._IDNTptr->localvalue->back()._DOUBLE_val -= step/2;
 	    yy=y.evalf2double(eval_level(contextptr),newcontextptr);
+
 	    if (yy.type!=_DOUBLE_)
 	      joindre=false;
 	    else {
@@ -1401,38 +2032,41 @@ namespace giac {
 		joindre=(j<=entrej) && (entrej<=oldj);
 	    }
 	    local_sto_double_increment(step/2,*vars._IDNTptr,newcontextptr);
-	    // vars._IDNTptr->localvalue->back()._DOUBLE_val += step/2;
 	  }
 	  else
 	    joindre=true;
 	}
 	else
 	  joindre=false;
-	if (joindre)
-	  chemin.push_back(gen(i,j));
-	else {
+	if (joindre) {
+          chemin.push_back(gen(i,j));
+        } else {
 	  if (!chemin.empty()){
 	    if (debug_infolevel){
 	      CERR << y << " step at " << i << " " << yy << endl;
 	      CERR << "curve " << chemin.size() << " " << chemin.front() << " .. " << chemin.back() << endl;
 	    }
-	    res.push_back(pnt_attrib(symb_curve(gen(makevecteur(vars+cst_i*f,vars,xmin,i,showeq),_PNT__VECT),gen(chemin,_GROUP__VECT)),attributs.empty()?color:attributs,contextptr));
+            res.push_back(pnt_attrib(symb_curve(gen(makevecteur(vars+cst_i*f,vars,xmin,i,showeq),_PNT__VECT),gen(chemin,_GROUP__VECT)),attributs.empty()?color:attributs,contextptr));
 	  }
 	  xmin=i;
-	  chemin=vecteur(1,gen(i,j));
+          chemin=vecteur(1,gen(i,j));
 	}
 	oldj=j;
       }
       if (!chemin.empty()){
 	if (debug_infolevel)
 	  CERR << "curve " << chemin.size() << " " << chemin.front() << " .. " << chemin.back() << endl;
-	res.push_back(pnt_attrib(symb_curve(gen(makevecteur(vars+cst_i*f,vars,xmin,i-step,showeq),_PNT__VECT),gen(chemin,_GROUP__VECT)),attributs.empty()?color:attributs,contextptr));
+        res.push_back(pnt_attrib(symb_curve(gen(makevecteur(vars+cst_i*f,vars,xmin,i-step,showeq),_PNT__VECT),gen(chemin,_GROUP__VECT)),attributs.empty()?color:attributs,contextptr));
       }
+#endif
       leave(protect,localvar,newcontextptr);
 #ifndef WIN32
       //      if (child_id)
       //	plot_instructions.push_back(res);
 #endif // WIN32
+#ifdef BAC_OPTIONS
+    remove_angle_mode(false);
+#endif
       if (res.size()==1)
 	return res.front();
       // gen e(res,_SEQ__VECT);
@@ -1977,14 +2611,25 @@ namespace giac {
     read_option(v,xmin,xmax,ymin,ymax,zmin,zmax,attributs,nstep,jstep,kstep,unfactored,contextptr);
   }
 
-  gen funcplotfunc(const gen & args,bool densityplot,const context * contextptr){
+#ifdef BAC_OPTIONS
+  gen funcplotfunc(const gen & args,bool densityplot,const context * contextptr) {
+    return funcplotfunc(args,densityplot,false,false,zero,contextptr);
+  }
+  gen funcplotfunc(const gen & args,bool densityplot,const bool logx, const bool logy, const gen & x_offset, const context * contextptr) {
+#else
+  gen funcplotfunc(const gen & args,bool densityplot,const context * contextptr) {
+#endif
     double xmin=gnuplot_xmin,xmax=gnuplot_xmax,ymin=gnuplot_ymin,ymax=gnuplot_ymax,zmin=gnuplot_zmin,zmax=gnuplot_zmax;
     bool showeq=false;
     if (densityplot)
       zmin=zmax; // if z-range is not given, then fmin/fmax will be used 
     int nstep=gnuplot_pixels_per_eval,jstep=0;
     gen attribut=default_color(contextptr);
+#ifdef BAC_OPTIONS
+    vecteur vargs(plotpreprocess_eval(args,false,contextptr));
+#else
     vecteur vargs(plotpreprocess(args,contextptr));
+#endif
     if (is_undef(vargs))
       return vargs;
     int s=int(vargs.size());
@@ -2003,27 +2648,18 @@ namespace giac {
     }
     if (s<1)
       return gensizeerr(contextptr);
-    gen e1=vargs[1];
-#if 0 // ?#ifdef EMCC
-    if (!densityplot && e1.type==_IDNT){
-      gen m=minus_inf,M=plus_inf;
-      vecteur poi,tvi;
-      if (step_func(vargs[0],e1,m,M,poi,tvi,true,false,contextptr)){
-	gen scale=(gnuplot_xmax-gnuplot_xmin)/5.0;
-	if (is_inf(m))
-	  m=gnuplot_xmin;
-	if (is_inf(M))
-	  M=gnuplot_xmax;
-	if (m!=M)
-	  scale=(M-m)/3.0;
-	m=m-0.973456*scale; M=M+1.018546*scale;
-	vargs[1]=symb_equal(vargs[1],symb_interval(m,M));
-	gen p=funcplotfunc(gen(vargs,_SEQ__VECT),false,contextptr);
-	poi=mergevecteur(poi,gen2vecteur(p));
-	//poi=mergevecteur(gen2vecteur(p),poi);
-	return gen(poi,_SEQ__VECT);
-      }
+#ifdef BAC_OPTIONS
+    gen e1=mksa_value(vargs[1],contextptr);
+    gen & x_unit_finder=vargs[1]._SYMBptr->feuille;
+    vecteur & x_unit_finderv=*x_unit_finder._VECTptr;
+    gen x_unit_finder_h(x_unit_finderv[1]);
+    x_unit_finder_h=x_unit_finder_h._SYMBptr->feuille;
+    gen x_unit = mksa_reduce_base(x_unit_finder_h._VECTptr->front(),contextptr);
+    if(is_one(x_unit)) {
+      x_unit = mksa_reduce_base(x_unit_finder_h._VECTptr->back(),contextptr);
     }
+#else
+    gen e1=vargs[1];
 #endif
     bool newsyntax;
     if (e1.type!=_VECT){
@@ -2087,25 +2723,40 @@ namespace giac {
 	if (s>6 && vargs[6].type==_INT_)
 	  jstep=vargs[6].val;
       }
+#ifdef BAC_OPTIONS
+      return plotfunc(vargs.front(),e1,vecteur(1,attribut),logx,logy,x_offset,x_unit,densityplot,xmin,xmax,ymin,ymax,zmin,zmax,nstep,jstep,showeq,contextptr);
+#else
       return plotfunc(vargs.front(),e1,vecteur(1,attribut),densityplot,xmin,xmax,ymin,ymax,zmin,zmax,nstep,jstep,showeq,contextptr);
+#endif
     }
     // plotfunc(func,x=xmin..xmax[,zminmax,attribut])
+#ifdef BAC_OPTIONS
+      double z1,z2;
+      if (readrange(mksa_value(evalf(vargs[2],0,contextptr),contextptr),gnuplot_zmin,gnuplot_zmax,vargs[2],z1,z2,contextptr)){
+        zmin=z1; zmax=z2;
+      }
+#else
     if (e1.type==_VECT && s>2){
       double z1,z2;
       if (readrange(vargs[2],gnuplot_zmin,gnuplot_zmax,vargs[2],z1,z2,contextptr)){
 	zmin=z1; zmax=z2;
       }
     }
+#endif
     vecteur attributs(1,attribut);
     read_option(vargs,xmin,xmax,ymin,ymax,attributs,nstep,jstep,contextptr);
+#ifdef BAC_OPTIONS
+    return plotfunc(vargs[0],e1,attributs,logx,logy,x_offset,x_unit,densityplot,xmin,xmax,ymin,ymax,zmin,zmax,nstep,jstep,showeq,contextptr);
+#else
     return plotfunc(vargs[0],e1,attributs,densityplot,xmin,xmax,ymin,ymax,zmin,zmax,nstep,jstep,showeq,contextptr);
+#endif
   }
   gen _plotfunc(const gen & args,const context * contextptr){
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     int nd;
     if ( (nd=is_distribution(args)) || (args.type==_VECT && !args._VECTptr->empty() && (nd=is_distribution(args._VECTptr->front())) ) ){
       if (is_discrete_distribution(nd))
-	*logptr(contextptr) << "Correct commandname is histogram" << endl;
+        *logptr(contextptr) << "Correct commandname is histogram" << endl;
       return _plot(args,contextptr);
     }
     return funcplotfunc(args,false,contextptr);
@@ -2113,6 +2764,47 @@ namespace giac {
   static const char _plotfunc_s []="plotfunc";
   static define_unary_function_eval_quoted (__plotfunc,&giac::_plotfunc,_plotfunc_s);
   define_unary_function_ptr5( at_plotfunc ,alias_at_plotfunc,&__plotfunc,_QUOTE_ARGUMENTS,true);
+
+#ifdef BAC_OPTIONS
+  gen _plotfuncopts(const gen & args, const bool logx, const bool logy,const context * contextptr){
+    if ( args.type==_STRNG && args.subtype==-1) return  args;
+    vecteur args_to_send;
+    vecteur & args_in = *args._VECTptr;
+    args_to_send.reserve(int(args._VECTptr->size())-1);
+    for(int i = 0; i < (int(args_in.size())-1); i++) {
+      args_to_send.push_back(args_in[i]);
+    }
+    return funcplotfunc(gen(args_to_send,_SEQ__VECT),false,logx,logy,args_in[int(args_in.size())-1],contextptr);
+  }
+
+  gen _plotfuncylog(const gen & args,const context * contextptr){
+    return _plotfuncopts(args, false, true, contextptr);
+  }
+  static const char _plotfuncylog_s []="plotfuncylog";
+  static define_unary_function_eval_quoted (__plotfuncylog,&giac::_plotfuncylog,_plotfuncylog_s);
+  define_unary_function_ptr5( at_plotfuncylog ,alias_at_plotfuncylog,&__plotfuncylog,_QUOTE_ARGUMENTS,true);
+
+  gen _plotfuncloglog(const gen & args,const context * contextptr){
+    return _plotfuncopts(args, true, true, contextptr);
+  }
+  static const char _plotfuncloglog_s []="plotfuncloglog";
+  static define_unary_function_eval_quoted (__plotfuncloglog,&giac::_plotfuncloglog,_plotfuncloglog_s);
+  define_unary_function_ptr5( at_plotfuncloglog ,alias_at_plotfuncloglog,&__plotfuncloglog,_QUOTE_ARGUMENTS,true);
+
+  gen _plotfunclog(const gen & args,const context * contextptr){
+    return _plotfuncopts(args, true, false, contextptr);
+  }
+  static const char _plotfunclog_s []="plotfunclog";
+  static define_unary_function_eval_quoted (__plotfunclog,&giac::_plotfunclog,_plotfunclog_s);
+  define_unary_function_ptr5( at_plotfunclog ,alias_at_plotfunclog,&__plotfunclog,_QUOTE_ARGUMENTS,true);
+
+  gen _plotfuncoffset(const gen & args,const context * contextptr){
+    return _plotfuncopts(args, false, false, contextptr);
+  }
+  static const char _plotfuncoffset_s []="plotfuncoffset";
+  static define_unary_function_eval_quoted (__plotfuncoffset,&giac::_plotfuncoffset,_plotfuncoffset_s);
+  define_unary_function_ptr5( at_plotfuncoffset ,alias_at_plotfuncoffset,&__plotfuncoffset,_QUOTE_ARGUMENTS,true);
+#endif
 
   gen _funcplot(const gen & args,const context * contextptr){
     if ( args.type==_STRNG && args.subtype==-1) return  args;
@@ -2170,7 +2862,39 @@ namespace giac {
       return undef;
     return f._VECTptr->front();
   }
-
+#ifdef BAC_OPTIONS
+  bool genreadrange(const gen & g,double defaultxmin,double defaultxmax,gen & x, gen & xmin, gen & xmax,GIAC_CONTEXT){
+    xmin=gen(defaultxmin);
+    xmax=gen(defaultxmax);
+    if (g.type==_IDNT){
+      x=g;
+      return true;
+    }
+    if (is_equal(g)){
+      gen & f=g._SYMBptr->feuille;
+      if (f.type!=_VECT)
+        return false;
+      vecteur & v=*f._VECTptr;
+      if (v.size()!=2 || v[0].type!=_IDNT)
+        return false;
+      bool res = false;
+      gen h(v[1]);
+      if (h.is_symb_of_sommet(at_interval)) {
+        h=h._SYMBptr->feuille;
+        if (h.type!=_VECT || h._VECTptr->size()!=2)
+          res = false;
+        else {
+          xmin=h._VECTptr->front();
+          xmax=h._VECTptr->back();
+          res= true;
+        }
+      }
+      x=v[0];
+      return res;
+    }
+    return false;
+  }
+#endif
   bool readrange(const gen & g,double defaultxmin,double defaultxmax,gen & x, double & xmin, double & xmax,GIAC_CONTEXT){
     xmin=defaultxmin;
     xmax=defaultxmax;
@@ -6650,6 +7374,40 @@ namespace giac {
       res=false;
     return res;
   }
+#ifdef BAC_OPTIONS
+
+  void genread_tmintmaxtstep(vecteur & vargs,gen & t,int vstart,gen &tmin,gen & tmax,gen &tstep,bool & tminmax_defined,bool & tstep_defined,GIAC_CONTEXT){
+    tstep=gen(gnuplot_tstep);
+    tminmax_defined=false;
+    tstep_defined=false;
+    gen tmp;
+    if (t.is_symb_of_sommet(at_equal)){
+      genreadrange(t,gnuplot_tmin,gnuplot_tmax,tmp,tmin,tmax,contextptr);
+      tminmax_defined=true;
+      t=t._SYMBptr->feuille._VECTptr->front();
+    }
+    int vs=int(vargs.size());
+    for (int i=vstart;i<vs;++i){
+      if (readvar(vargs[i])==t){
+        genreadrange(vargs[i],gnuplot_tmin,gnuplot_tmax,tmp,tmin,tmax,contextptr);
+        tminmax_defined=true;
+        vargs.erase(vargs.begin()+i);
+        --vs;
+        --i;
+      }
+      if (vargs[i].is_symb_of_sommet(at_equal) && vargs[i]._SYMBptr->feuille.type==_VECT && vargs[i]._SYMBptr->feuille._VECTptr->front().type==_INT_){
+        gen n=vargs[i]._SYMBptr->feuille._VECTptr->back();
+        if (vargs[i]._SYMBptr->feuille._VECTptr->front().val==_TSTEP){
+          tstep=n;
+          tstep_defined=true;
+          vargs.erase(vargs.begin()+i);
+          --vs;
+          --i;
+        }
+      }
+    }
+  }
+#endif
 
   void read_tmintmaxtstep(vecteur & vargs,gen & t,int vstart,double &tmin,double & tmax,double &tstep,bool & tminmax_defined,bool & tstep_defined,GIAC_CONTEXT){
     tstep=gnuplot_tstep;
@@ -6664,22 +7422,22 @@ namespace giac {
     int vs=int(vargs.size());
     for (int i=vstart;i<vs;++i){
       if (readvar(vargs[i])==t){
-	readrange(vargs[i],gnuplot_tmin,gnuplot_tmax,tmp,tmin,tmax,contextptr);
-	tminmax_defined=true;
-	vargs.erase(vargs.begin()+i);
-	--vs;
-	--i;
+      	readrange(vargs[i],gnuplot_tmin,gnuplot_tmax,tmp,tmin,tmax,contextptr);
+      	tminmax_defined=true;
+      	vargs.erase(vargs.begin()+i);
+      	--vs;
+      	--i;
       }
       if (vargs[i].is_symb_of_sommet(at_equal) && vargs[i]._SYMBptr->feuille.type==_VECT && vargs[i]._SYMBptr->feuille._VECTptr->front().type==_INT_){
-	gen n=vargs[i]._SYMBptr->feuille._VECTptr->back();
-	if (vargs[i]._SYMBptr->feuille._VECTptr->front().val==_TSTEP){
-	  n=evalf_double(n,1,contextptr);
-	  tstep=std::abs(n._DOUBLE_val);
-	  tstep_defined=true;
-	  vargs.erase(vargs.begin()+i);
-	  --vs;
-	  --i;
-	}
+      	gen n=vargs[i]._SYMBptr->feuille._VECTptr->back();
+      	if (vargs[i]._SYMBptr->feuille._VECTptr->front().val==_TSTEP){
+      	  n=evalf_double(n,1,contextptr);
+      	  tstep=std::abs(n._DOUBLE_val);
+      	  tstep_defined=true;
+      	  vargs.erase(vargs.begin()+i);
+      	  --vs;
+      	  --i;
+      	}
       }
     }
   }
@@ -8179,10 +8937,34 @@ namespace giac {
   static define_unary_function_eval2 (__curve,&giac::_curve,_curve_s,&printascurve);
   define_unary_function_ptr5( at_curve ,alias_at_curve,&__curve,0,true);
 
-  gen plotparam(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_tmin, double function_tmax,double function_tstep,const gen & equation,const gen & parameq,const gen & vparam,const context * contextptr){
+#ifdef BAC_OPTIONS
+  void insert_to_array(double *x_vals, double *y_vals, double *t_vals, bool *defined, const int insert, const int length) {
+    double x_to_insert = x_vals[length-1];
+    double y_to_insert = y_vals[length-1];
+    double t_to_insert = t_vals[length-1];
+    bool d_to_insert = defined[length-1];
+    for(int count = (length-1); count > (insert+1); count--) {
+      x_vals[count] = x_vals[count - 1];
+      y_vals[count] = y_vals[count - 1];
+      t_vals[count] = t_vals[count - 1];
+      defined[count] = defined[count - 1];
+    }
+    x_vals[insert+1] = x_to_insert;
+    y_vals[insert+1] = y_to_insert;
+    t_vals[insert+1] = t_to_insert;
+    defined[insert+1] = d_to_insert;
+  }
+  gen plotparam(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_tmin, double function_tmax,double function_tstep,const gen & equation,const gen & parameq,const context * contextptr){
+    return plotparam(f, vars, attributs, densityplot, false, false, plus_one, plus_one, function_xmin, function_xmax, function_ymin, function_ymax, function_tmin,  function_tmax, function_tstep, equation, parameq,contextptr);
+  }  
+  gen plotparam(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,const bool logx, const bool logy, const gen t_unit, const gen t_unit_orig,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_tmin, double function_tmax,double function_tstep,const gen & equation,const gen & parameq,const context * contextptr){
+#else
+  gen plotparam(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_tmin, double function_tmax,double function_tstep,const gen & equation,const gen & parameq,const context * contextptr){
+#endif
     if (function_tstep<=0 || (function_tmax-function_tmin)/function_tstep>max_nstep)
       return gensizeerr(gettext("Plotparam: unable to discretize: tmin, tmax, tstep=")+print_DOUBLE_(function_tmin,12)+","+print_DOUBLE_(function_tmax,12)+","+print_DOUBLE_(function_tstep,12)+gettext("\nTry a larger value for tstep"));
     gen fC(f);
+    context * newcontextptr=clone_context(contextptr);
     if (f.type==_VECT && f._VECTptr->size()==2)
       fC=f._VECTptr->front()+cst_i*f._VECTptr->back();
     gen attribut=attributs.empty()?default_color(contextptr):attributs[0];
@@ -8190,26 +8972,617 @@ namespace giac {
     // approx_mode(true,contextptr);
     gen locvar(vars);
     locvar.subtype=0;
+#ifdef BAC_OPTIONS
+    remove_angle_mode(true);
+    purgenoassume(locvar,newcontextptr);
+    gen xy=quotesubst(f,vars,gen(identificateur("t__temp")),contextptr),xy_,x_,y_;
+    local_sto(locvar * t_unit,identificateur("t__temp"),newcontextptr);
+    xy = evalf(xy, eval_level(contextptr),newcontextptr);
+    bool do_mksa = false;
+    if(is_undef(xy) || _usimplify_hits_temperature(xy,newcontextptr) || _test_for_sommet(f, at_local)) {
+      xy=quotesubst(f,vars,locvar,contextptr);
+      do_mksa = true;
+    } else 
+      xy = normal(mksa_value(xy,contextptr),newcontextptr);
+#else
     gen xy=quotesubst(f,vars,locvar,contextptr),xy_,x_,y_;
+#endif
     bool joindre;
     vecteur localvar(1,vars),res;
-    context * newcontextptr=(context *) contextptr;
     int protect=giac::bind(vecteur(1,function_tmin),localvar,newcontextptr);
     vecteur chemin;
     double i,j,oldi=0,oldj=0,entrei,entrej;
     double t=function_tmin;
+    
+#ifdef BAC_OPTIONS
+    double bound_code = 1791.583; // Hack...this specific value means the xmin is NOT defined by user
+    bool x_min_provided = std::abs(bound_code - function_xmin) > 1e-10;
+    bool x_max_provided = std::abs(bound_code - function_xmax) > 1e-10;
+    bool y_min_provided = std::abs(bound_code - function_ymin) > 1e-10;
+    bool y_max_provided = std::abs(bound_code - function_ymax) > 1e-10;
+
+    // Indeces will be my ordered points, and will point to the index in res where the point lives (res wont be in order)
+    double t_vals[(int)function_tstep+1];
+    double x_vals[(int)function_tstep+1];
+    double y_vals[(int)function_tstep+1];
+    bool defined[(int)function_tstep+1];
+    double y_max = -1*std::numeric_limits<double>::max();
+    double y_min = std::numeric_limits<double>::max();
+    double x_max = -1*std::numeric_limits<double>::max();
+    double x_min = std::numeric_limits<double>::max();
+    bool all_undefined = true;
+
+    // Seed the indeces:
+    int counter = 0;
+    double seeder = function_tmin;
+    bool break_next = false;
+    while(true) {
+      defined[counter] = true;
+      if(do_mksa)
+        local_sto(seeder * t_unit,*vars._IDNTptr,newcontextptr);
+      else
+        local_sto(seeder,*vars._IDNTptr,newcontextptr);
+      if (xy.type==_VECT && xy._VECTptr->size()==2){
+        if(do_mksa) {
+          x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+          y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+        } else {
+          x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+          y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+        }
+      } else {
+        if(do_mksa)
+          xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+        else
+          xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+        if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+          x_=xy_._VECTptr->front();
+          y_=xy_._VECTptr->back();
+        }
+        else {
+          x_=re(xy_,newcontextptr);
+          y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+        }
+      }
+      if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+        // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+        if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+          x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+          if(x_vals[counter] > x_max) x_max = x_vals[counter];
+          if(x_vals[counter] < x_min) x_min = x_vals[counter];
+        } else
+          defined[counter] = false;
+      } else {
+        x_vals[counter] = x_._DOUBLE_val;
+        if(x_vals[counter] > x_max) x_max = x_vals[counter];
+        if(x_vals[counter] < x_min) x_min = x_vals[counter];
+      }
+      if (y_.type!=_DOUBLE_) {
+        // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+        if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+          y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+          if(y_vals[counter] > y_max) y_max = y_vals[counter];
+          if(y_vals[counter] < y_min) y_min = y_vals[counter];
+        } else
+          defined[counter] = false;
+      } else {
+        y_vals[counter] = y_._DOUBLE_val;
+        if(y_vals[counter] > y_max) y_max = y_vals[counter];
+        if(y_vals[counter] < y_min) y_min = y_vals[counter];
+      }
+      if(defined[counter]) all_undefined = false; 
+      t_vals[counter++] = seeder;
+      if(break_next) break;
+      seeder += (function_tmax - function_tmin)/20. * (std_rand()*0.5/RAND_MAX+0.75); // slight randomness here to help get through periodic functions where aliasing could throw everything off
+      if(seeder > function_tmax) {
+        seeder = function_tmax;
+        break_next = true;
+      }
+    }
+    if(!all_undefined) {
+      // Start the adaptive sampling tests to fill in areas of high curvature:
+      int current_index = 1;
+      double max_curvature = 0.1736; // sin 10 degrees
+      int iterations=0;
+      while(true) {
+        iterations++;
+        if(iterations > 25000) break;
+        if((current_index+2) > counter) break; // DONE!
+        double ip, i0, in;
+        ip = t_vals[current_index-1];
+        i0 = t_vals[current_index];
+        in = t_vals[current_index+1];
+        // Is first y value undefined?  If so, add value just to the right of the first point and move on
+        if(!defined[current_index-1]) {
+          if((i0-ip) < (function_tmax - function_tmin)/7000) {
+            current_index++;
+            continue;
+          }
+          double newi = ip + (function_tmax - function_tmin)/10000;
+          defined[counter] = true;
+          if(do_mksa)
+            local_sto(newi * t_unit,*vars._IDNTptr,newcontextptr);
+          else
+            local_sto(newi,*vars._IDNTptr,newcontextptr);
+          if (xy.type==_VECT && xy._VECTptr->size()==2){
+            if(do_mksa) {
+              x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+            }
+          } else {
+            if(do_mksa)
+              xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            else
+              xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+            if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+              x_=xy_._VECTptr->front();
+              y_=xy_._VECTptr->back();
+            }
+            else {
+              x_=re(xy_,newcontextptr);
+              y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+            }
+          }
+          if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+              x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+              if(x_vals[counter] > x_max) x_max = x_vals[counter];
+              if(x_vals[counter] < x_min) x_min = x_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            x_vals[counter] = x_._DOUBLE_val;
+            if(x_vals[counter] > x_max) x_max = x_vals[counter];
+            if(x_vals[counter] < x_min) x_min = x_vals[counter];
+          }
+          if (y_.type!=_DOUBLE_) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+              y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+              if(y_vals[counter] > y_max) y_max = y_vals[counter];
+              if(y_vals[counter] < y_min) y_min = y_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            y_vals[counter] = y_._DOUBLE_val;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          t_vals[counter++] = newi;
+          insert_to_array(x_vals, y_vals, t_vals, defined, current_index-1, counter);
+          current_index++;
+          continue;
+        }
+        // Is middle y value undefined?  If so, add two points: one just to left of undefined point, and one halway between
+        if(!defined[current_index]) {
+          if((i0-ip) < (function_tmax - function_tmin)/2000) {
+            current_index++;
+            continue;
+          }
+          double newi = i0 - (function_tmax - function_tmin)/10000;
+          defined[counter] = true;
+          if(do_mksa)
+            local_sto(newi * t_unit,*vars._IDNTptr,newcontextptr);
+          else
+            local_sto(newi,*vars._IDNTptr,newcontextptr);
+          if (xy.type==_VECT && xy._VECTptr->size()==2){
+            if(do_mksa) {
+              x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+            }
+          } else {
+            if(do_mksa)
+              xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            else
+              xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+            if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+              x_=xy_._VECTptr->front();
+              y_=xy_._VECTptr->back();
+            }
+            else {
+              x_=re(xy_,newcontextptr);
+              y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+            }
+          }
+          if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+              x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+              if(x_vals[counter] > x_max) x_max = x_vals[counter];
+              if(x_vals[counter] < x_min) x_min = x_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            x_vals[counter] = x_._DOUBLE_val;
+            if(x_vals[counter] > x_max) x_max = x_vals[counter];
+            if(x_vals[counter] < x_min) x_min = x_vals[counter];
+          }
+          if (y_.type!=_DOUBLE_) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+              y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+              if(y_vals[counter] > y_max) y_max = y_vals[counter];
+              if(y_vals[counter] < y_min) y_min = y_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            y_vals[counter] = y_._DOUBLE_val;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          t_vals[counter++] = newi;
+          insert_to_array(x_vals, y_vals, t_vals, defined, current_index-1, counter);
+          newi = (i0 + ip)/2;
+          defined[counter] = true;
+          if(do_mksa)
+            local_sto(newi * t_unit,*vars._IDNTptr,newcontextptr);
+          else
+            local_sto(newi,*vars._IDNTptr,newcontextptr);
+          if (xy.type==_VECT && xy._VECTptr->size()==2){
+            if(do_mksa) {
+              x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+            }
+          } else {
+            if(do_mksa)
+              xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            else
+              xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+            if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+              x_=xy_._VECTptr->front();
+              y_=xy_._VECTptr->back();
+            }
+            else {
+              x_=re(xy_,newcontextptr);
+              y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+            }
+          }
+          if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+              x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+              if(x_vals[counter] > x_max) x_max = x_vals[counter];
+              if(x_vals[counter] < x_min) x_min = x_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            x_vals[counter] = x_._DOUBLE_val;
+            if(x_vals[counter] > x_max) x_max = x_vals[counter];
+            if(x_vals[counter] < x_min) x_min = x_vals[counter];
+          }
+          if (y_.type!=_DOUBLE_) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+              y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+              if(y_vals[counter] > y_max) y_max = y_vals[counter];
+              if(y_vals[counter] < y_min) y_min = y_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            y_vals[counter] = y_._DOUBLE_val;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          t_vals[counter++] = newi;
+          insert_to_array(x_vals, y_vals, t_vals, defined, current_index-1, counter);
+          continue;
+        }
+        // Is third y value undefined?  If so, add value between second and third point
+        if(!defined[current_index+1]) {
+          if((in-i0) < (function_tmax - function_tmin)/7000) {
+            current_index++;
+            current_index++;
+            continue;
+          }
+          double newi = in - (function_tmax - function_tmin)/10000;
+          defined[counter] = true;
+          if(do_mksa)
+            local_sto(newi * t_unit,*vars._IDNTptr,newcontextptr);
+          else
+            local_sto(newi,*vars._IDNTptr,newcontextptr);
+          if (xy.type==_VECT && xy._VECTptr->size()==2){
+            if(do_mksa) {
+              x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+            }
+          } else {
+            if(do_mksa)
+              xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            else
+              xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+            if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+              x_=xy_._VECTptr->front();
+              y_=xy_._VECTptr->back();
+            }
+            else {
+              x_=re(xy_,newcontextptr);
+              y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+            }
+          }
+          if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+              x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+              if(x_vals[counter] > x_max) x_max = x_vals[counter];
+              if(x_vals[counter] < x_min) x_min = x_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            x_vals[counter] = x_._DOUBLE_val;
+            if(x_vals[counter] > x_max) x_max = x_vals[counter];
+            if(x_vals[counter] < x_min) x_min = x_vals[counter];
+          }
+          if (y_.type!=_DOUBLE_) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+              y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+              if(y_vals[counter] > y_max) y_max = y_vals[counter];
+              if(y_vals[counter] < y_min) y_min = y_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            y_vals[counter] = y_._DOUBLE_val;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          t_vals[counter++] = newi;
+          insert_to_array(x_vals, y_vals, t_vals, defined, current_index, counter);
+          continue;
+        }
+        // Woohoo! All values defined.  Now lets see if the curvature is acceptable;
+        double xp, x0, xn, x_res;
+        xp = x_vals[current_index-1];
+        x0 = x_vals[current_index];
+        xn = x_vals[current_index+1];
+        double x_min_to_use, x_max_to_use;
+        if(!x_min_provided) {
+          x_min_to_use = x_min;
+        } else {
+          x_min_to_use = function_xmin - (x_max - function_xmin)*.25;
+          if((xp < x_min_to_use) && (x0 < x_min_to_use) && (xn < x_min_to_use)) {
+            //Outside visible window
+            current_index++;
+            continue;
+          }
+          x_min_to_use = function_xmin;
+        }
+        if(!x_max_provided) {
+          x_max_to_use = x_max;
+        } else {
+          x_max_to_use = function_xmax + (function_xmax - x_min_to_use)*.25;
+          if((xp > x_max_to_use) && (x0 > x_max_to_use) && (xn > x_max_to_use)) {
+            //Outside visible window
+            current_index++;
+            continue;
+          }
+          x_max_to_use = function_xmax;
+        } 
+        if(logx) {
+          xp = std::log10(xp);
+          x0 = std::log10(x0);
+          xn = std::log10(xn);
+          x_res = (std::log10(x_max_to_use) - std::log10(x_min_to_use)) / 700;
+        } else
+          x_res = (x_max_to_use - x_min_to_use) / 700;
+        if((x_res > 0) && (std::abs(x0-xp) < x_res) && (std::abs(x0-xn) < x_res) && (std::abs(xn-xp) < x_res)) {
+          // Changes are within window resolution, so no need to try and refine things
+          current_index++;
+          continue;
+        }
+        double yp, y0, yn, y_res;
+        yp = y_vals[current_index-1];
+        y0 = y_vals[current_index];
+        yn = y_vals[current_index+1];
+        double y_min_to_use, y_max_to_use;
+        if(!y_min_provided) {
+          y_min_to_use = y_min;
+        } else {
+          y_min_to_use = function_ymin - (y_max - function_ymin)*.25;
+          if((yp < y_min_to_use) && (y0 < y_min_to_use) && (yn < y_min_to_use)) {
+            //Outside visible window
+            current_index++;
+            continue;
+          }
+          y_min_to_use = function_ymin;
+        }
+        if(!y_max_provided) {
+          y_max_to_use = y_max;
+        } else {
+          y_max_to_use = function_ymax + (function_ymax - y_min_to_use)*.25;
+          if((yp > y_max_to_use) && (y0 > y_max_to_use) && (yn > y_max_to_use)) {
+            //Outside visible window
+            current_index++;
+            continue;
+          }
+          y_max_to_use = function_ymax;
+        } 
+        if(logy) {
+          yp = std::log10(yp);
+          y0 = std::log10(y0);
+          yn = std::log10(yn);
+          y_res = (std::log10(y_max_to_use) - std::log10(y_min_to_use)) / 300;
+        } else
+          y_res = (y_max_to_use - y_min_to_use) / 300;
+        if((y_res > 0) && (std::abs(y0-yp) < y_res) && (std::abs(y0-yn) < y_res) && (std::abs(yn-yp) < y_res)) {
+          // Changes are within window resolution, so no need to try and refine things
+          current_index++;
+          continue;
+        }
+        // Compute curvature:
+        double local_y_max = yp;
+        if(y0 > local_y_max){ local_y_max = y0; }
+        if(yn > local_y_max){ local_y_max = yn; }
+        double local_y_min = yp;
+        if(y0 < local_y_min){ local_y_min = y0; }
+        if(yn < local_y_min){ local_y_min = yn; }
+        double dx0 = (x0-xp)/(xn-xp);
+        double dx1 = (xn-x0)/(xn-xp);
+        double dy0 = (y0-yp)/(local_y_max-local_y_min);
+        double dy1 = (yn-y0)/(local_y_max-local_y_min);
+        double il0 = 1./std::sqrt(dx0*dx0 + dy0*dy0);
+        double il1 = 1./std::sqrt(dx1*dx1 + dy1*dy1);
+        double sinq = (dx0*dy1 - dy0*dx1) * il0 * il1;
+        if(fabs(sinq) > max_curvature) {
+          // Need to insert more points around where I am.  Insert a new point before me:
+          double newi = (i0 + ip)/2;
+          defined[counter] = true;
+          if(do_mksa)
+            local_sto(newi * t_unit,*vars._IDNTptr,newcontextptr);
+          else
+            local_sto(newi,*vars._IDNTptr,newcontextptr);
+          if (xy.type==_VECT && xy._VECTptr->size()==2){
+            if(do_mksa) {
+              x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+            }
+          } else {
+            if(do_mksa)
+              xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            else
+              xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+            if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+              x_=xy_._VECTptr->front();
+              y_=xy_._VECTptr->back();
+            }
+            else {
+              x_=re(xy_,newcontextptr);
+              y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+            }
+          }
+          if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+              x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+              if(x_vals[counter] > x_max) x_max = x_vals[counter];
+              if(x_vals[counter] < x_min) x_min = x_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            x_vals[counter] = x_._DOUBLE_val;
+            if(x_vals[counter] > x_max) x_max = x_vals[counter];
+            if(x_vals[counter] < x_min) x_min = x_vals[counter];
+          }
+          if (y_.type!=_DOUBLE_) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+              y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+              if(y_vals[counter] > y_max) y_max = y_vals[counter];
+              if(y_vals[counter] < y_min) y_min = y_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            y_vals[counter] = y_._DOUBLE_val;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          t_vals[counter++] = newi;
+          insert_to_array(x_vals, y_vals, t_vals, defined, current_index-1, counter);
+          newi = (in + i0)/2;
+          defined[counter] = true;
+          if(do_mksa)
+            local_sto(newi * t_unit,*vars._IDNTptr,newcontextptr);
+          else
+            local_sto(newi,*vars._IDNTptr,newcontextptr);
+          if (xy.type==_VECT && xy._VECTptr->size()==2){
+            if(do_mksa) {
+              x_ = evalf2double_nock(mksa_value(xy._VECTptr->front().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(mksa_value(xy._VECTptr->back().evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            } else {
+              x_ = evalf2double_nock(xy._VECTptr->front(),eval_level(contextptr),newcontextptr);
+              y_ = evalf2double_nock(xy._VECTptr->back(),eval_level(contextptr),newcontextptr);
+            }
+          } else {
+            if(do_mksa)
+              xy_ = evalf2double_nock(mksa_value(xy.evalf(eval_level(contextptr),newcontextptr),newcontextptr),eval_level(contextptr),newcontextptr);
+            else
+              xy_ = evalf2double_nock(xy,eval_level(contextptr),newcontextptr);
+            if (xy_.type==_VECT && xy_._VECTptr->size()==2){
+              x_=xy_._VECTptr->front();
+              y_=xy_._VECTptr->back();
+            }
+            else {
+              x_=re(xy_,newcontextptr);
+              y_=im(xy_,newcontextptr).evalf_double(eval_level(contextptr),newcontextptr);
+            }
+          }
+          if ((x_.type!=_DOUBLE_) || has_inf_or_undef(x_)) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((x_.type == _CPLX) && is_greater(abs(re(x_,contextptr),contextptr),abs(im(x_,contextptr)*1e10,contextptr),contextptr)) {
+              x_vals[counter] = re(x_, contextptr)._DOUBLE_val;
+              if(x_vals[counter] > x_max) x_max = x_vals[counter];
+              if(x_vals[counter] < x_min) x_min = x_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            x_vals[counter] = x_._DOUBLE_val;
+            if(x_vals[counter] > x_max) x_max = x_vals[counter];
+            if(x_vals[counter] < x_min) x_min = x_vals[counter];
+          }
+          if (y_.type!=_DOUBLE_) {
+            // rounding errors can lead to 'complex' numbers with 1e-15 for imaginary portion.  If so, drop it
+            if((y_.type == _CPLX) && is_greater(abs(re(y_,contextptr),contextptr),abs(im(y_,contextptr)*1e10,contextptr),contextptr)) {
+              y_vals[counter] = re(y_, contextptr)._DOUBLE_val;
+              if(y_vals[counter] > y_max) y_max = y_vals[counter];
+              if(y_vals[counter] < y_min) y_min = y_vals[counter];
+            } else
+              defined[counter] = false;
+          } else {
+            y_vals[counter] = y_._DOUBLE_val;
+            if(y_vals[counter] > y_max) y_max = y_vals[counter];
+            if(y_vals[counter] < y_min) y_min = y_vals[counter];
+          }
+          t_vals[counter++] = newi;
+          insert_to_array(x_vals, y_vals, t_vals, defined, current_index+1, counter);
+        } else
+          current_index++;
+      }
+    }
+    // Should have a nice array of numbers now.  Go ahead and build output array:
+    double u_offset, u_coeff;
+    if(is_one(t_unit_orig) || has_inf_or_undef(t_unit_orig)) {
+      u_offset = 0;
+      u_coeff = 1;
+    } else {
+      u_offset = mksa_offset(symbolic(at_unit,makevecteur(plus_one,t_unit_orig)),contextptr)._DOUBLE_val;
+      u_coeff = mksa_coefficient(symbolic(at_unit,makevecteur(plus_one,t_unit_orig)), contextptr)._DOUBLE_val;
+    }
+    for(int count = 0; count < counter; count++) {
+      double t_val = t_vals[count]/u_coeff - u_offset;
+      if(defined[count])
+        res.push_back(makevecteur(t_val,x_vals[count],y_vals[count]));
+      else
+        res.push_back(makevecteur(t_val,plus_one,plus_inf));
+    }
+#else
     int nstep=int((function_tmax-function_tmin)/function_tstep+.5);
+
     // bool old_io_graph=io_graph(contextptr);
     // io_graph(false,contextptr);
     for (int count=0;count<=nstep;++count,t+= function_tstep){
       local_sto_double(t,*vars._IDNTptr,newcontextptr);
       // vars._IDNTptr->localvalue->back()._DOUBLE_val =t;
       if (xy.type==_VECT && xy._VECTptr->size()==2){
-	x_=xy._VECTptr->front().evalf2double(eval_level(contextptr),newcontextptr);
-	y_=xy._VECTptr->back().evalf2double(eval_level(contextptr),newcontextptr);
+	  x_=xy._VECTptr->front().evalf2double(eval_level(contextptr),newcontextptr);
+	  y_=xy._VECTptr->back().evalf2double(eval_level(contextptr),newcontextptr);
       }
       else {
-	xy_=xy.evalf2double(eval_level(contextptr),newcontextptr);
+	  xy_=xy.evalf2double(eval_level(contextptr),newcontextptr);
 	if (xy_.type==_VECT && xy_._VECTptr->size()==2){
 	  x_=xy_._VECTptr->front();
 	  y_=xy_._VECTptr->back();
@@ -8260,35 +9633,45 @@ namespace giac {
       else
 	joindre=true;
       if (joindre)
-	chemin.push_back(gen(i,j));
+	  chemin.push_back(gen(i,j));
       else {
 	if (!chemin.empty())
 	  res.push_back(symb_pnt(symb_curve(gen(makevecteur(fC,vars,function_tmin,t,0,equation,parameq,vparam),_PNT__VECT),gen(chemin,_GROUP__VECT)),attribut,contextptr));
 	function_tmin=t;
-	chemin=vecteur(1,gen(i,j));
+	  chemin=vecteur(1,gen(i,j));
       }
       oldi=i;
       oldj=j;
     }
     if (!chemin.empty())
       res.push_back(symb_pnt(symb_curve(gen(makevecteur(fC,vars,function_tmin,function_tmax,0,equation,parameq,vparam),_PNT__VECT),gen(chemin,_GROUP__VECT)),attribut,contextptr));
+#endif
     leave(protect,localvar,newcontextptr);
     // io_graph(old_io_graph,contextptr);
 #if !defined(WIN32) && defined(WITH_GNUPLOT)
     if (child_id) plot_instructions.push_back(res);
 #endif // WIN32
     // approx_mode(save_approx_mode,contextptr);
+#ifdef BAC_OPTIONS
+    remove_angle_mode(false);
+#endif
     if (res.size()==1)
       return res.front();
     // gen e(res,_SEQ__VECT);
     return res; // e;
   }
-
-  gen plotparam(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_tmin, double function_tmax,double function_tstep,const gen & equation,const gen & parameq,const context * contextptr){
-    return plotparam(f,vars,attributs,densityplot,function_xmin,function_xmax,function_ymin,function_ymax,function_tmin,function_tmax,function_tstep,equation,parameq,undef,contextptr);
-  }
+#ifdef BAC_OPTIONS
 
   gen paramplotparam(const gen & args,bool densityplot,const context * contextptr){
+    return paramplotparam(args, densityplot, false, false, contextptr);
+  }
+  gen paramplotparam(const gen & args,bool densityplot,const bool logx, const bool logy, const context * contextptr){
+#else
+  gen plotparam(const gen & f,const gen & vars,const vecteur & attributs,bool densityplot,double function_xmin,double function_xmax,double function_ymin,double function_ymax,double function_tmin, double function_tmax,double function_tstep,const gen & equation,const gen & parameq,const context * contextptr){
+    return plotparam(f, vars, attributs, densityplot, false, false, plus_one, plus_one, function_xmin, function_xmax, function_ymin, function_ymax, function_tmin,  function_tmax, function_tstep, equation, parameq,contextptr);
+  }
+  gen paramplotparam(const gen & args,bool densityplot,const context * contextptr){
+#endif
     // args= [x(t)+i*y(t),t] should add a t interval
     bool f_autoscale=autoscale;
     if (args.type!=_VECT || args.subtype!=_SEQ__VECT){
@@ -8323,12 +9706,33 @@ namespace giac {
 #endif
 	return paramplotparam(makesequence(args,t),false,contextptr);
     }
+#ifdef BAC_OPTIONS
+    vecteur vargs(plotpreprocess_eval(args,false,contextptr));
+#else
     vecteur vargs(plotpreprocess(args,contextptr));
+#endif
     if (is_undef(vargs))
       return vargs;
     if (vargs.size()<2)
       return symbolic(at_plotparam,args);
     gen f=vargs.front();
+#ifdef BAC_OPTIONS
+    gen & t_unit_finder=vargs[1]._SYMBptr->feuille;
+    vecteur & t_unit_finderv=*t_unit_finder._VECTptr;
+    gen t_unit_finder_h(t_unit_finderv[1]);
+    t_unit_finder_h=t_unit_finder_h._SYMBptr->feuille;
+    gen t_unit_orig = t_unit_finder_h._VECTptr->front();
+    gen t_unit = mksa_reduce_base(t_unit_finder_h._VECTptr->front(),contextptr);
+    if(is_one(t_unit)) {
+      t_unit_orig = evalf(t_unit_finder_h._VECTptr->back(),0,contextptr);
+      t_unit = mksa_reduce_base(t_unit_finder_h._VECTptr->back(),contextptr);
+    }
+    if((t_unit_orig.type == _SYMB) && t_unit_orig.is_symb_of_sommet(at_unit))
+      t_unit_orig = t_unit_orig._SYMBptr->feuille._VECTptr->back();
+    else
+      t_unit_orig = plus_one;
+    vargs = mksa_value(vargs,contextptr);
+#endif
     gen vars=vargs[1];
     /*
       if (f.type==_VECT && f._VECTptr->size()==2)
@@ -8377,6 +9781,16 @@ namespace giac {
 	f_autoscale=false;
 	readrange(vargs[i],tmin,tmax,vargs[i],tmin,tmax,contextptr); 
 	umin=tmin; umax=tmax;
+      }
+#endif
+#ifdef BAC_OPTIONS
+      if (readvar(vargs[i])==gen(identificateur("x__limits"))) {
+  f_autoscale=false;
+  readrange(vargs[i],gnuplot_xmin,gnuplot_xmax,vargs[i],xmin,xmax,contextptr);
+      }
+      if (readvar(vargs[i])==gen(identificateur("y__limits"))) {
+  f_autoscale=false;
+  readrange(vargs[i],gnuplot_ymin,gnuplot_ymax,vargs[i],ymin,ymax,contextptr);
       }
 #endif
       if (readvar(vargs[i])==x__IDNT_e){
@@ -8462,8 +9876,45 @@ namespace giac {
     }
     if (!readrange(vars,tmin,tmax,vars,tmin,tmax,contextptr))
       return gensizeerr(gettext("2nd arg must be a free variable"));
+#ifdef BAC_OPTIONS
+    return plotparam(f,vars,attributs,densityplot,logx,logy,t_unit,t_unit_orig,xmin,xmax,ymin,ymax,tmin,tmax,tstep,eq,parameq,contextptr);
+#else
     return plotparam(f,vars,attributs,densityplot,xmin,xmax,ymin,ymax,tmin,tmax,tstep,eq,parameq,vparam,contextptr);
+#endif
   }
+#ifdef BAC_OPTIONS
+  gen _plotparam(const gen & args,const context * contextptr){
+    if ( args.type==_STRNG && args.subtype==-1) return  args;
+    return paramplotparam(args,true,false,false,contextptr);
+  }
+  static const char _plotparam_s []="plotparam";
+  static define_unary_function_eval_quoted (__plotparam,&giac::_plotparam,_plotparam_s);
+  define_unary_function_ptr5( at_plotparam ,alias_at_plotparam,&__plotparam,_QUOTE_ARGUMENTS,true);
+  
+  gen _plotparamlog(const gen & args,const context * contextptr){
+    if ( args.type==_STRNG && args.subtype==-1) return  args;
+    return paramplotparam(args,true,true,false,contextptr);
+  }
+  static const char _plotparamlog_s []="plotparamlog";
+  static define_unary_function_eval_quoted (__plotparamlog,&giac::_plotparamlog,_plotparamlog_s);
+  define_unary_function_ptr5( at_plotparamlog ,alias_at_plotparamlog,&__plotparamlog,_QUOTE_ARGUMENTS,true);
+  
+  gen _plotparamylog(const gen & args,const context * contextptr){
+    if ( args.type==_STRNG && args.subtype==-1) return  args;
+    return paramplotparam(args,true,false,true,contextptr);
+  }
+  static const char _plotparamylog_s []="plotparamylog";
+  static define_unary_function_eval_quoted (__plotparamylog,&giac::_plotparamylog,_plotparamylog_s);
+  define_unary_function_ptr5( at_plotparamylog ,alias_at_plotparamylog,&__plotparamylog,_QUOTE_ARGUMENTS,true);
+  
+  gen _plotparamyloglog(const gen & args,const context * contextptr){
+    if ( args.type==_STRNG && args.subtype==-1) return  args;
+    return paramplotparam(args,true,true,true,contextptr);
+  }
+  static const char _plotparamyloglog_s []="plotparamyloglog";
+  static define_unary_function_eval_quoted (__plotparamyloglog,&giac::_plotparamyloglog,_plotparamyloglog_s);
+  define_unary_function_ptr5( at_plotparamyloglog ,alias_at_plotparamyloglog,&__plotparamyloglog,_QUOTE_ARGUMENTS,true);
+#else
   gen _plotparam(const gen & args,const context * contextptr){
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     return paramplotparam(args,true,contextptr);
@@ -8471,6 +9922,7 @@ namespace giac {
   static const char _plotparam_s []="plotparam";
   static define_unary_function_eval_quoted (__plotparam,&giac::_plotparam,_plotparam_s);
   define_unary_function_ptr5( at_plotparam ,alias_at_plotparam,&__plotparam,_QUOTE_ARGUMENTS,true);
+#endif
 
   static const char _courbe_parametrique_s []="courbe_parametrique";
   static define_unary_function_eval_quoted (__courbe_parametrique,&giac::_plotparam,_courbe_parametrique_s);
@@ -10744,14 +12196,24 @@ namespace giac {
       dim3=(v[3]!=at_plan);
     vecteur res1v,resv;
     if (tmin<0){
+#ifdef BAC_OPTIONS
+      gen tstepv = gen(tstep);
+      gen res1=odesolve(t0,tmin,f,y0,tstepv,false,curve,ymin,ymax,maxstep,contextptr);
+#else
       gen res1=odesolve(t0,tmin,f,y0,tstep,curve,ymin,ymax,maxstep,contextptr);
+#endif
       if (is_undef(res1)) return res1;
       res1v=*res1._VECTptr;
       std::reverse(res1v.begin(),res1v.end());
     }
     res1v.push_back(makevecteur(t0,y0));
     if (tmax>0){
+#ifdef BAC_OPTIONS
+      gen tstepv = gen(tstep);
+      gen res2=odesolve(t0,tmax,f,y0,tstepv,false,curve,ymin,ymax,maxstep,contextptr);
+#else
       gen res2=odesolve(t0,tmax,f,y0,tstep,curve,ymin,ymax,maxstep,contextptr);
+#endif
       if (is_undef(res2)) return res2;
       resv=mergevecteur(res1v,*res2._VECTptr);
     }
@@ -10973,7 +12435,6 @@ namespace giac {
   static const char _fieldplot_s []="fieldplot";
   static define_unary_function_eval (__fieldplot,&giac::_plotfield,_fieldplot_s);
   define_unary_function_ptr5( at_fieldplot ,alias_at_fieldplot,&__fieldplot,0,true);
-
 
   // like plotode but the initial(s) condition(s) will be specified
   // by the user
@@ -11517,12 +12978,150 @@ namespace giac {
 #endif
   }
 
+  #ifdef BAC_OPTIONS
+
+    // archive is made of couples name/value
+    static void read_string_archive(const std::string & s, const vecteur & vars, GIAC_CONTEXT){
+      vecteur v;
+      istringstream inf(s);
+      readargs_from_stream(inf,v,contextptr);
+      const_iterateur it=v.begin(),itend=v.end();
+      const_iterateur it2=vars.begin(),it2end=vars.end();
+      for (;it!=itend;++it){
+        if (it->type!=_STRNG)
+          continue;
+        string name=*it->_STRNGptr;
+        ++it;
+        if (it==itend)
+          break;
+        bool restore_var = false;
+        for (it2=vars.begin();it2!=it2end;++it2) {
+          if (it2->type!=_STRNG)
+            continue;
+          string test_name=*it2->_STRNGptr;
+          if(name.compare(test_name) == 0) {
+            restore_var = true;
+            break;
+          }
+        }
+        if(restore_var) {
+          gen value=*it;
+          (*contextptr->tabptr)[name.c_str()]=value;
+        }
+      }
+    }
+    
+    static std::string print_string_archive(const sym_string_tab & m){
+      ostringstream of;
+      sym_string_tab::const_iterator it=m.begin(),itend=m.end();
+      if (it==itend){
+        of << "[ ]" << endl;
+        return of.str();
+      }
+      of << "[{\"name\":" << string2gen(it->first,false);
+      std::string genout = gen2string(it->second);
+      size_t pos = 0;
+      while((pos = genout.find("\"", pos)) != std::string::npos) {
+        genout.replace(pos, 1, "\\\"");
+        pos += 2;
+      }
+      pos=0;
+      while((pos = genout.find("\n", pos)) != std::string::npos) {
+        genout.replace(pos, 1, "\\n");
+        pos += 2;
+      }
+      of << ", \"data\":\"" << genout << "\", \"latex\":\"";
+      genout = gen2tex(it->second, context0);
+      pos = 0;
+      while((pos = genout.find("\"", pos)) != std::string::npos) {
+        genout.replace(pos, 1, "\\\"");
+        pos += 2;
+      }
+      pos=0;
+      while((pos = genout.find("\n", pos)) != std::string::npos) {
+        genout.replace(pos, 1, "\\n");
+        pos += 2;
+      }
+      of << genout << "\"}";
+      ++it;
+      for (;it!=itend;++it){
+        of << ",{\"name\":" ;
+        of << string2gen(it->first,false);
+        genout = gen2string(it->second);
+        pos = 0;
+        while((pos = genout.find("\"", pos)) != std::string::npos) {
+          genout.replace(pos, 1, "\\\"");
+          pos += 2;
+        }
+        pos=0;
+        while((pos = genout.find("\n", pos)) != std::string::npos) {
+          genout.replace(pos, 1, "\\n");
+          pos += 2;
+        }
+        of << ", \"data\":\"" << genout << "\", \"latex\":\"";
+        genout = gen2tex(it->second, context0);
+        pos = 0;
+        while((pos = genout.find("\"", pos)) != std::string::npos) {
+          genout.replace(pos, 1, "\\\"");
+          pos += 2;
+        }
+        pos=0;
+        while((pos = genout.find("\n", pos)) != std::string::npos) {
+          genout.replace(pos, 1, "\\n");
+          pos += 2;
+        }
+        of << genout << "\"}";
+      }
+      of << "]" << endl;
+      return of.str();
+    }
+    gen _archive_string(const gen & g,GIAC_CONTEXT){
+      sym_string_tab arc;
+      // loop through user variables
+      sym_tab::const_iterator jt=contextptr->tabptr->begin(),jtend=contextptr->tabptr->end();
+      for (;jt!=jtend;++jt){
+        gen b=identificateur(jt->first);
+        arc[b.print(contextptr)]=eval(b,eval_level(contextptr),contextptr);
+      }
+      const std::string output = print_string_archive(arc);
+      return string2gen(output, false);
+    }
+    static const char _archive_string_s []="archive_string";
+    static define_unary_function_eval (__archive_string,(const gen_op_context)giac::_archive_string,_archive_string_s);
+    define_unary_function_ptr5( at_archive_string ,alias_at_archive_string,&__archive_string,0,true);
+
+    gen _unarchive_string(const gen & g,GIAC_CONTEXT){
+      if ( g.type==_STRNG && g.subtype==-1) return  g;
+      if ( g.type!=_VECT) return g;
+      vecteur v=*g._VECTptr;
+      if ( v.size() != 2) return g;
+      if (v[0].type != _STRNG) return g;
+      if (v[1].type != _VECT) return g;
+
+      std::string input = "get_archive_data('";
+      input += *(v[0])._STRNGptr;
+      input += "')";
+      std::string restore = emscripten_run_script_string(input.data());
+      read_string_archive(restore.data(),*(v[1])._VECTptr,contextptr);
+      return 1;
+    }
+    static const char _unarchive_string_s []="unarchive_string";
+    static define_unary_function_eval (__unarchive_string,(const gen_op_context)giac::_unarchive_string,_unarchive_string_s);
+    define_unary_function_ptr5( at_unarchive_string ,alias_at_unarchive_string,&__unarchive_string,0,true);
+  #endif
+
   gen _archive(const gen & args,GIAC_CONTEXT){
     if ( args.type==_STRNG && args.subtype==-1) return  args;
-    gen tmp=check_secure();
-    if (is_undef(tmp)) return tmp;
+    #ifndef EMCC //Emscripten allows us to 'store' archive in memory file system that is removed on refresh
+      gen tmp=check_secure();
+      if (is_undef(tmp)) return tmp;
+    #endif
     if (args.type==_STRNG){ // archive session state
-      return archive_session(true,*args._STRNGptr,contextptr);
+      #ifdef BAC_OPTIONS
+        return archive_session(false,*args._STRNGptr,contextptr);
+      #else 
+        return archive_session(true,*args._STRNGptr,contextptr);
+      #endif
     }
     int s;
     if (args.type != _VECT || (s = int(args._VECTptr->size()))<2)
@@ -11534,10 +13133,10 @@ namespace giac {
     if (s==3){ // new binary archive format
       FILE * f=fopen(a._STRNGptr->c_str(),"w");
       if (!f)
-	return gensizeerr(gettext("Unable to open file ")+a.print(contextptr));
+	      return gensizeerr(gettext("Unable to open file ")+a.print(contextptr));
       fprintf(f,"%s","-1  "); // header: type would be -1
       if (!archive_save(f,b,contextptr))
-	return gensizeerr(gettext("Error writing ")+b.print(contextptr)+" in file "+a.print(contextptr));
+	      return gensizeerr(gettext("Error writing ")+b.print(contextptr)+" in file "+a.print(contextptr));
       fclose(f);
       return b;
     }

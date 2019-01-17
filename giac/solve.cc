@@ -2657,9 +2657,29 @@ namespace giac {
     }
     return res;
   }
+#ifdef BAC_OPTIONS
+  gen _solve_no_bracket(const gen & args, GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen res = _solve(args,contextptr);
+      if((res.type==_VECT) && (int(res._VECTptr->size()) == 1)) return res._VECTptr->front(); // Remove brackets if only one answer
+      return res;
+    #else
+      return _solve(args,contextptr);
+    #endif
+  }
+  // if 1 answer, solutions will be in list
+  static const char _solver_s []="solver";
+  static define_unary_function_eval_quoted (__solver,&_solve,_solver_s);
+  define_unary_function_ptr5( at_solver ,alias_at_solver,&__solver,_QUOTE_ARGUMENTS,true);
+  // if 1 answer, solutions won't be in list
+  static const char _solve_s []="solve";
+  static define_unary_function_eval_quoted (__solve,&_solve_no_bracket,_solve_s);
+  define_unary_function_ptr5( at_solve ,alias_at_solve,&__solve,_QUOTE_ARGUMENTS,true);
+#else
   static const char _solve_s []="solve";
   static define_unary_function_eval_quoted (__solve,&_solve,_solve_s);
   define_unary_function_ptr5( at_solve ,alias_at_solve,&__solve,_QUOTE_ARGUMENTS,true);
+#endif
 
   gen _realproot(const gen & e,GIAC_CONTEXT) {
     gen g=_proot(e,contextptr);
@@ -3379,9 +3399,18 @@ namespace giac {
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     if (calc_mode(contextptr)==1 && args.type!=_VECT)
       return _fsolve(makesequence(args,ggb_var(args)),contextptr);
-    vecteur v(plotpreprocess(args,contextptr));
+    vecteur v;
+#ifdef BAC_OPTIONS
+    remove_angle_mode(true);
+    v = plotpreprocess_eval(args, false, contextptr);
+    if(!_test_for_sommet(gen(v), at_local))
+#endif
+    v = plotpreprocess(args,contextptr);
     gen res=undef;
     res=in_fsolve(v,contextptr);
+#ifdef BAC_OPTIONS
+    remove_angle_mode(false);
+#endif
     if (calc_mode(contextptr)!=1)
       return res;
     // ggb always in a list
@@ -3413,7 +3442,11 @@ namespace giac {
       }
       w.push_back(v[i]);
     }
+#ifdef BAC_OPTIONS
+    v=lidnt_no_unit(w);
+#else
     v=lidnt(w);
+#endif
     w.clear();
     for (unsigned i=0;i<v.size();++i){
       if (!is_inf(v[i]) && !is_undef(v[i]))
@@ -3421,7 +3454,6 @@ namespace giac {
     }
     return w;
   }
-
   gen in_fsolve(vecteur & v,GIAC_CONTEXT){
     if (is_undef(v))
       return v;  
@@ -3445,10 +3477,10 @@ namespace giac {
       return in_fsolve(v,contextptr);
     }
     gen v0=remove_equal(v[0]);
-    vecteur I1(lidnt(v[1]));
+    vecteur I1(lidnt(v[1])); 
     vecteur I0(true_lidnt(v0)); // should remove embedded fsolve/sum/int
     I0=lidnt(makevecteur(evalf(I0,1,contextptr),I1));
-    if (_sort(I0,contextptr)!=_sort(I1,contextptr))
+    if (!_test_for_sommet(v0,at_local) && (_sort(I0,contextptr)!=_sort(I1,contextptr)))
       return symbolic(at_fsolve,gen(v,_SEQ__VECT));
     int evalf_after=interv?3:1;
     if (s>=2 && v0.type==_VECT && v[1].type==_VECT && !v[1]._VECTptr->empty()){
@@ -3542,7 +3574,9 @@ namespace giac {
       if (1
 	  //abs_calc_mode(contextptr)==38
 	  ){
+#ifndef BAC_OPTIONS
 	*logptr(contextptr) << gettext("Solving by bisection with change of variable x=tan(t) and t=-1.57..1.57. Try fsolve(equation,x=guess) for iterative solver or fsolve(equation,x=xmin..xmax) for bisection.") << endl;
+#endif
 	gen eq=subst(v[0],v[1],tan(v[1],contextptr),false,contextptr);
   //grad
 	vecteur v_=makevecteur(eq,symb_equal(v[1],angle_radian(contextptr)?symb_interval(-1.57,1.57):(angle_degree(contextptr)?symb_interval(-89.97,89.97):symb_interval(-99.97,99.97))));
@@ -3615,7 +3649,11 @@ namespace giac {
     }
     if (gguess.type==_VECT && gguess._VECTptr->size()>1){
       for (unsigned i=0;i<gguess._VECTptr->size();++i){
-	gen tmp=evalf_double((*gguess._VECTptr)[i],1,contextptr);
+#ifdef BAC_OPTIONS
+        gen tmp=evalf_double(mksa_value((*gguess._VECTptr)[i],contextptr),1,contextptr);
+#else
+        gen tmp=evalf_double((*gguess._VECTptr)[i],1,contextptr);
+#endif
 	if (tmp.type!=_DOUBLE_ && tmp.type!=_CPLX)
 	  return gensizeerr("Bad guess "+gguess.print(contextptr));
       }
@@ -4217,7 +4255,29 @@ namespace giac {
     }
     return newton_rand(j,real,xmin,xmax,contextptr);
   }
-  
+#ifdef BAC_OPTIONS
+  gen apply_final_units(const gen & a,const gen & m,const gen & u,const gen & o) {
+    if(a.type==_VECT) {
+      gen a2 = a;
+      for(int i = 0; i < int(a._VECTptr->size()); i++) {
+        if((*u._VECTptr)[i]==_degF_unit && (*m._VECTptr)[i]==_K_unit)
+          (*a2._VECTptr)[i] = (*a._VECTptr)[i] * _usimplify_base(symbolic(at_unit, makevecteur(plus_one, (*m._VECTptr)[i]/_Rankine_unit)),context0) + (*o._VECTptr)[i];
+        else if((*u._VECTptr)[i]==_degC_unit && (*m._VECTptr)[i]==_K_unit)
+          (*a2._VECTptr)[i] = (*a._VECTptr)[i] + (*o._VECTptr)[i];
+        else
+          (*a2._VECTptr)[i] = (*a._VECTptr)[i] * _usimplify_base(symbolic(at_unit, makevecteur(plus_one, (*m._VECTptr)[i]/(*u._VECTptr)[i])),context0) + (*o._VECTptr)[i];
+      }
+      return apply_units(a2, u);
+    } else {
+      if(u==_degF_unit && m==_K_unit)
+        return apply_units(a * _usimplify_base(symbolic(at_unit, makevecteur(plus_one, m/_Rankine_unit)),context0) + o, u);
+      else if(u==_degC_unit && m==_K_unit)
+        return apply_units(a + o, u);
+      else
+        return apply_units(a * _usimplify_base(symbolic(at_unit, makevecteur(plus_one, m/u)),context0) + o, u);
+    }
+  }
+#endif
   gen newton(const gen & f0, const gen & x,const gen & guess_,int niter,double eps1, double eps2,bool real,double xmin,double xmax,double rand_xmin,double rand_xmax,double init_prefactor,GIAC_CONTEXT){
     if (real && (!is_zero(im(f0,contextptr),contextptr) || !is_zero(im(guess_,contextptr),contextptr)) )
       real=false;
@@ -4229,10 +4289,78 @@ namespace giac {
     gen guess(guess_);
     // ofstream of("log"); of << f0 << endl << x << endl << guess << endl << niter ; 
     gen f=real?eval(f0,1,context0):f0;  // eval of f wrt context0 is intentionnal, replace UTPN by erf
+    gen fa;
+#ifdef BAC_OPTIONS
+    // Test for bad guess w/r/t units provided:
+    gen guessu;    
+    gen a_unit = get_units(guess);
+    if(guess.type == _VECT) {
+      vecteur gu;
+      gu.reserve(int(guess._VECTptr->size()));
+      for(int i=0; i<int(guess._VECTptr->size());i++) {
+        if(is_zero((*guess._VECTptr)[i]))
+          gu.push_back((0.00000656434)*symbolic(at_unit, makevecteur(plus_one, (*a_unit._VECTptr)[i])));
+        else
+          gu.push_back((*guess._VECTptr)[i]);
+      }
+      guessu = gen(gu);
+    } else if(is_zero(guess)) guessu = gen(0.00000656434)*symbolic(at_unit, makevecteur(plus_one, a_unit)); // random non-zero to test units)
+    else guessu = guess;
+    bool programmatic_function = _test_for_sommet(f,at_local);
+    fa =evalf(eval(subst(f,x,guessu,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
+    gen f_unit = get_units(fa);
+    fa = remove_units(fa);
+    if(fa.type == _VECT) {
+      const_iterateur it=fa._VECTptr->begin(),itend=fa._VECTptr->end();
+      for (;it!=itend;++it)
+        if(is_undef(*it)) return gensizeerr("Bad Guess - Ensure guess has correct units and does not produce an undefined result. ");
+    } else if(is_undef(fa)) return gensizeerr("Bad Guess - Ensure guess has correct units and does not produce an undefined result. ");
+    guess = remove_units(guess);
+    gen a_unit_orig = a_unit;
+    gen offset_a = zero;
+    if(a_unit.type == _VECT) {
+      vecteur offset_av;
+      offset_av.reserve(int(a_unit._VECTptr->size()));
+      for (int i=0;i<int(a_unit._VECTptr->size());++i) {
+        if((*a_unit._VECTptr)[i] == _degF_unit) {
+          (*a_unit._VECTptr)[i] = _Rankine_unit;
+          (*guess._VECTptr)[i] = (*guess._VECTptr)[i] + 459.67;
+          offset_av.push_back(gen(-459.67));
+        } else if((*a_unit._VECTptr)[i] == _degC_unit) {
+          (*a_unit._VECTptr)[i] = _K_unit;
+          (*guess._VECTptr)[i] = (*guess._VECTptr)[i] + 273.15;
+          offset_av.push_back(gen(-273.15));
+        } else {
+          offset_av.push_back(zero);
+        }
+      }
+      offset_a = gen(offset_av);
+    } else {
+      if(a_unit == _degF_unit) {
+        a_unit = _Rankine_unit;
+        guess = guess + 459.67;
+        offset_a = gen(-459.67);
+      } else if(a_unit == _degC_unit) {
+        a_unit = _K_unit;
+        guess = guess + 273.15;
+        offset_a = gen(-273.15);
+      }
+    }
+    gen mksa_a_unit = get_units(mksa_reduce_base(a_unit, contextptr));
+    guess = mksa_value(apply_units(guess, a_unit),contextptr); // convert guess to mksa
+
+    // Test for any offset units in the expressions...if so, we have to do unit simplifications on each loop, otherwise we can 
+    // do it once upfront, saving a boatload of computational time
+    bool do_mksa = false;
+    if(_usimplify_hits_temperature(evalf(eval(f,eval_level(contextptr),contextptr),1,contextptr),contextptr) || programmatic_function) 
+      do_mksa = true;
+    else // Do unit simplifications upfront:
+      f = mksa_value(f, contextptr);
+#endif
     if (guess.is_symb_of_sommet(at_interval))
       guess=(guess._SYMBptr->feuille[0]+guess._SYMBptr->feuille[1])/2;
     bool inv_after=f.type==_VECT;
-    gen a,b,d,fa,fb,invdf=inv_after?derive(f,x,contextptr):inv(derive(f,x,contextptr),contextptr),epsg1(eps1),epsg2(eps2);
+    gen a,b,d,fb,invdf=inv_after?derive(f,x,contextptr):inv(derive(f,x,contextptr),contextptr),epsg1(eps1),epsg2(eps2);
     if (is_undef(invdf))
       return invdf;
     if (ckmatrix(invdf))
@@ -4251,6 +4379,11 @@ namespace giac {
 #ifndef NO_STDEXCEPT
       try {
 #endif
+#ifdef BAC_OPTIONS
+      if(do_mksa)
+        fa=mksa_value(evalf(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+      else
+#endif
 	fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
 	// First loop to localize the solution with prefactor
 	gen lambda(init_prefactor);
@@ -4263,9 +4396,18 @@ namespace giac {
 	    interrupted = true; ctrl_c=false;
 	    return gensizeerr(gettext("Stopped by user interruption.")); 
 	  }
-	  d=subst(invdf,x,a,false,contextptr);
+#ifdef BAC_OPTIONS
+      if(do_mksa) {
+        if(programmatic_function) {
+          // Guess d based on slope of nearby points
+          d=(mksa_value(eval(subst(f,x,apply_units(1.001*a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),contextptr)-mksa_value(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),contextptr))/mksa_value(eval(apply_units(0.001*a,mksa_a_unit),eval_level(contextptr),contextptr),contextptr);
+          if(!inv_after) d = inv(d, contextptr);
+        } else
+          d=mksa_value(eval(subst(invdf,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),contextptr);
+      } else
+#endif
+          d=eval(subst(invdf,x,a,false,contextptr),eval_level(contextptr),contextptr);
 	  // of << k << " " << d << " " << invdf << " " << x << " " << a << " ";
-	  d=eval(d,eval_level(contextptr),contextptr);
 	  // of << d << " " << fa << " ";
 	  if (inv_after)
 	    d=linsolve(evalf(d,1,contextptr),-fa,contextptr);
@@ -4273,14 +4415,24 @@ namespace giac {
 	    d=-evalf(d*fa,1,contextptr);
 	  if (is_undef(d) || (d.type==_VECT &&d._VECTptr->empty()) || !lidnt(d).empty()){
 	    a=newton_rand(j,real,rand_xmin,rand_xmax,f,contextptr);
-	    fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
+#ifdef BAC_OPTIONS
+      if(do_mksa)
+            fa=mksa_value(evalf(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+      else
+#endif
+            fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
 	    continue;
 	  }	    
-	  if (d.type!=_FLOAT_ && d.type!=_DOUBLE_ && d.type!=_CPLX && d.type!=_REAL && d.type!=_VECT && !is_undef(d) && !is_inf(d))
+          if (d.type!=_FLOAT_ && d.type!=_DOUBLE_ && d.type!=_CPLX && d.type!=_REAL && d.type!=_VECT && !is_undef(d) && !is_inf(d))
 	    return gensizeerr(contextptr);
 	  if (k==0 && is_zero(d,contextptr) && is_greater(abs(fa,contextptr),std::sqrt(eps2),contextptr)){
 	    a=newton_rand(j,real,rand_xmin,rand_xmax,f,contextptr);
-	    fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
+#ifdef BAC_OPTIONS
+      if(do_mksa)
+            fa=mksa_value(evalf(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+      else
+#endif
+            fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
 	    continue;
 	  }
 	  // of << d << " " << endl;
@@ -4294,14 +4446,24 @@ namespace giac {
 		if (is_greater(a,xmin,contextptr) && is_greater(xmax,a,contextptr))
 		break;
 	      }
-	      fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
+#ifdef BAC_OPTIONS
+        if(do_mksa)
+              fa=mksa_value(evalf(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+        else
+#endif
+              fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
 	      continue;
 	    }
 	  }
 	  else {
 	    if(real && !is_zero(im(b,contextptr),contextptr)){
 	      a=newton_rand(j,real,rand_xmin,rand_xmax,contextptr);
-	      fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
+#ifdef BAC_OPTIONS
+        if(do_mksa)
+              fa=mksa_value(evalf(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+        else
+#endif
+              fa=evalf(eval(subst(f,x,a,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
 	      continue;
 	    }
 	  }
@@ -4315,7 +4477,12 @@ namespace giac {
 	    a=b;
 	    break;
 	  }
-	  fb=evalf(eval(subst(f,x,b,false,contextptr),eval_level(contextptr),contextptr),1,contextptr);
+#ifdef BAC_OPTIONS
+    if(do_mksa)
+          fb=mksa_value(evalf(eval(subst(f,x,apply_units(b,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+    else
+#endif
+          fb=evalf(eval(subst(f,x,b,false,contextptr),eval_level(contextptr),contextptr),1,contextptr); 
 	  if ( (real && !is_zero(im(fb,contextptr),contextptr)) ||
 	       is_positive(_l2norm(fb,contextptr)-_l2norm(fa,contextptr),contextptr)){
 	    // Decrease prefactor and try again
@@ -4333,7 +4500,11 @@ namespace giac {
 	} // end for (k<niter)
 	if (k==niter){
 	  if (out)
+#ifdef BAC_OPTIONS
+            return apply_final_units(a,mksa_a_unit,a_unit_orig,offset_a);
+#else
 	    return a;
+#endif
 	  continue;
 	}
 	// Second loop to improve precision (prefactor 1)
@@ -4345,10 +4516,35 @@ namespace giac {
 	    interrupted = true; ctrl_c=false;
 	    return gensizeerr(gettext("Stopped by user interruption.")); 
 	  }
-	  if (inv_after)
-	    d=linsolve(evalf(subst(invdf,x,a,false,contextptr),1,contextptr),-subst(f,x,a,false,contextptr),contextptr);
-	  else
-	    d=-evalf(subst(invdf,x,a,false,contextptr)*subst(f,x,a,false,contextptr),1,contextptr);
+#ifdef BAC_OPTIONS
+        if(do_mksa) {
+          fa=mksa_value(evalf(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr);
+          if(programmatic_function) {
+            // Guess d based on slope of nearby points
+            d=(mksa_value(eval(subst(f,x,apply_units(1.001*a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),contextptr)-mksa_value(eval(subst(f,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),contextptr))/mksa_value(eval(apply_units(0.001*a,mksa_a_unit),eval_level(contextptr),contextptr),contextptr);
+            if(!inv_after) d = inv(d, contextptr);
+          } else
+            d=mksa_value(eval(subst(invdf,x,apply_units(a,mksa_a_unit),false,contextptr),eval_level(contextptr),contextptr),contextptr);
+          /*if(f_unit.type == _VECT) {
+            for(int jj=0;jj<int(f_unit._VECTptr->size());jj++)  //inv_after = true
+              (*d._VECTptr)[jj] = _ufactor(makesequence((*d._VECTptr)[jj], symbolic(at_unit, makevecteur(plus_one, (*f_unit._VECTptr)[jj] / (*a_unit._VECTptr)[jj]))),contextptr);
+          } else 
+            d = _ufactor(makesequence(d, symbolic(at_unit, makevecteur(plus_one, a_unit / f_unit))),contextptr); //inv_after = false;
+          d = remove_units_nosimp(d);*/
+          if (inv_after)
+            d=linsolve(evalf(d,1,contextptr),-fa,contextptr);
+          else
+            d=-evalf(d*fa,1,contextptr);
+        } else {
+#endif
+          if (inv_after)
+            d=linsolve(evalf(subst(invdf,x,a,false,contextptr),1,contextptr),-subst(f,x,a,false,contextptr),contextptr);
+          else
+            d=-evalf(subst(invdf,x,a,false,contextptr)*subst(f,x,a,false,contextptr),1,contextptr);
+#ifdef BAC_OPTIONS
+        }
+
+#endif
 	  a=a+d;
 	  if (is_positive(epsg2-_l2norm(d,contextptr)/max(1,abs(a,contextptr),contextptr),contextptr))
 	    break;
@@ -4364,7 +4560,11 @@ namespace giac {
     } // end for
     if (j>5)
       return undef;
+#ifdef BAC_OPTIONS
+    return apply_final_units(a,mksa_a_unit,a_unit_orig,offset_a);
+#else
     return a;
+#endif
   }
 
   gen _newton(const gen & args,GIAC_CONTEXT){
@@ -5970,12 +6170,13 @@ namespace giac {
       return multvecteur(inv(g._FRACptr->den,context0),*g._FRACptr->num._VECTptr);
     return gen2vecteur(g);
   }
-
   vecteur gsolve(const vecteur & eq_orig,const vecteur & var_orig,bool complexmode,int evalf_after,GIAC_CONTEXT){
     // replace variables in var_orig by true identificators
     vecteur var(var_orig);
-    if (!lop(eq_orig,*at_unit).empty())
+#ifndef BAC_OPTIONS
+    if (!lop(eq_orig,*at_unit).empty()) 
       *logptr(contextptr) << "Units are not supported"<<endl;
+#endif
     // check if the whole system is linear
     if (is_zero(derive(derive(eq_orig,var,contextptr),var,contextptr),contextptr)){
       gen sol=_linsolve(makesequence(eq_orig,var),contextptr);

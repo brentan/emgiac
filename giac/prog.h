@@ -222,8 +222,10 @@ namespace giac {
   extern const unary_function_ptr * const  at_args;
 
   vecteur lidnt_with_at(const gen & args);
+  vecteur lidnt_no_unit(const gen & args);
   vecteur lidnt(const gen & args);
   void lidnt(const gen & args,vecteur & res,bool with_at);
+  void lidnt(const gen & args,vecteur & res,bool with_at,bool no_unit);
 
   gen _lname(const gen & args,GIAC_CONTEXT);
   extern const unary_function_ptr * const  at_lname;
@@ -309,6 +311,14 @@ namespace giac {
 
   gen _angle_radian(const gen & args,GIAC_CONTEXT);
   extern const unary_function_ptr * const  at_angle_radian;
+
+  #ifdef BAC_OPTIONS
+    gen set_units(const gen & args,GIAC_CONTEXT);
+    extern const unary_function_ptr * const  at_set_units;
+    gen one_index(const gen & args,GIAC_CONTEXT);
+    extern const unary_function_ptr * const  at_one_index;
+    int is_rads_Hz(const gen & a, const gen & b, GIAC_CONTEXT);
+  #endif
  
   gen _epsilon(const gen & args,GIAC_CONTEXT);
   extern const unary_function_ptr * const  at_epsilon;
@@ -590,7 +600,33 @@ namespace giac {
     float mol;
     float cd;
     float E;
+    float d;
+    float F;
+    float C;
   };
+  struct unit_system {
+    double m;
+    double kg;
+    double s;
+    double A;
+    double K;
+    double mol;
+    double cd;
+    double E;
+    double d;
+    gen m_base;
+    gen kg_base;
+    gen s_base;
+    gen A_base;
+    gen K_base;
+    gen mol_base;
+    gen cd_base;
+    gen E_base;
+    gen d_base;
+  };
+  extern "C" void setCurrency(const double d, const int i);
+
+  unit_system & default_unit();
   extern const mksa_unit * const unitptr_tab[]; // table of units alpha-sorted
   extern const unsigned unitptr_tab_length;
   extern const char * const unitname_tab[];
@@ -612,7 +648,27 @@ namespace giac {
   // Unit management
   gen unitpow(const gen & g,const gen & exponent);
   gen mksa_reduce(const gen & g,GIAC_CONTEXT);
+  gen clear_usual_units(const gen & g, GIAC_CONTEXT);
+  #ifdef BAC_OPTIONS
+    gen mksa_reduce_base(const gen & g,GIAC_CONTEXT);
+    gen mksa_coefficient(const gen & g,GIAC_CONTEXT);
+    gen mksa_offset(const gen & g,GIAC_CONTEXT);
+    gen mksa_base_first(const gen & g, GIAC_CONTEXT);
+    gen mksa_to_var(const gen & g,GIAC_CONTEXT);
+    gen default_units(const gen & g,GIAC_CONTEXT);
+    gen default_units_function(const gen & g,bool force_at_unit,GIAC_CONTEXT);
+    gen default_unit_remove_base(const gen & g,GIAC_CONTEXT);
+    vecteur default_unit_remove_base(const vecteur & v,GIAC_CONTEXT);
+  #endif
   gen chk_not_unit(const gen & g);
+  gen chk_not_unit_together(const gen & a, const gen & b, const bool compare,GIAC_CONTEXT);
+  bool chk_temperature_units(const gen & a, const gen & b, GIAC_CONTEXT);
+  bool chk_temperature_units(const gen & a_in, const bool include_delta, GIAC_CONTEXT);
+  bool chk_temperature_units(const gen & a, GIAC_CONTEXT);
+  gen sym_add_temp(const gen & a, const gen & b, GIAC_CONTEXT);
+  gen sym_mult_temp(const gen & a, const gen & b, GIAC_CONTEXT);
+  gen adjust_temp(const gen & v,GIAC_CONTEXT);
+
   gen find_or_make_symbol(const std::string & s,bool check38,GIAC_CONTEXT);
   std::map<const char *, const mksa_unit *,ltstr> & unit_conversion_map();
   gen mksa_register(const char * s,const mksa_unit * equiv);
@@ -621,6 +677,23 @@ namespace giac {
   vecteur mksa_convert(const gen & g,GIAC_CONTEXT);
   gen _ufactor(const gen & g,GIAC_CONTEXT);
   gen _usimplify(const gen & g,GIAC_CONTEXT);
+  #ifdef BAC_OPTIONS
+  gen _usimplify_base(const gen & g,GIAC_CONTEXT);
+  gen _usimplify_angle(const gen & g,GIAC_CONTEXT);
+  gen mksa_value(const gen & g,GIAC_CONTEXT);
+  vecteur mksa_value(const vecteur & g,GIAC_CONTEXT);
+  gen _usimplify_base_function(const gen & g,const bool angle_mode, const bool unit_remove, const bool mksa, const bool do_recursive, GIAC_CONTEXT);
+  bool _test_for_sommet(const gen & g, const gen & s);
+  bool _usimplify_hits_temperature(const gen & g, GIAC_CONTEXT);
+  gen remove_units(const gen & g);
+  gen remove_units_nosimp(const gen & g);
+  gen get_units(const gen & g);
+  gen apply_units(const gen & g, const gen & u);
+  vecteur remove_units(const vecteur & v);
+  vecteur remove_units_nosimp(const vecteur & v);
+  vecteur get_units(const vecteur & v);
+  vecteur apply_units(const vecteur & v, const vecteur & u);
+  #endif
 
   extern const mksa_unit __m_unit;
   extern const mksa_unit __kg_unit;
@@ -674,6 +747,14 @@ namespace giac {
   extern const mksa_unit __dyn_unit;
   extern const mksa_unit __erg_unit;
   extern const mksa_unit __eV_unit;
+
+  extern const mksa_unit __degF_unit;
+  extern const mksa_unit __deltaF_unit;
+  extern const mksa_unit __degC_unit;
+  extern const mksa_unit __deltaC_unit;
+  extern const mksa_unit __deltaK_unit;
+  extern const mksa_unit __deltaRankine_unit;
+
   // extern const mksa_unit __degreeF_unit;
   extern const mksa_unit __Rankine_unit;
   extern const mksa_unit __fath_unit;
@@ -729,9 +810,11 @@ namespace giac {
   extern const mksa_unit __ozUK_unit;
   extern const mksa_unit __P_unit;
   extern const mksa_unit __pc_unit;
+  extern const mksa_unit __pcf_unit;
   extern const mksa_unit __pdl_unit;
   extern const mksa_unit __pk_unit;
   extern const mksa_unit __psi_unit;
+  extern const mksa_unit __ksi_unit;
   extern const mksa_unit __pt_unit;
   extern const mksa_unit __ptUK_unit;
   extern const mksa_unit __liqpt_unit;
@@ -847,6 +930,14 @@ namespace giac {
   // extern gen _°_unit;
   extern gen _d_unit;
   extern gen _dB_unit;
+  extern gen _deg_unit;
+  extern gen _degF_unit;
+  extern gen _degC_unit;
+  extern gen _deltaF_unit;
+  extern gen _deltaC_unit;
+  extern gen _deltaK_unit;
+  extern gen _deltaRankine_unit;
+  extern gen _Rankine_unit;
   extern gen _dyn_unit;
   extern gen _erg_unit;
   extern gen _eV_unit;
@@ -896,9 +987,11 @@ namespace giac {
   extern gen _ozUK_unit;
   extern gen _P_unit;
   extern gen _pc_unit;
+  extern gen _pcf_unit;
   extern gen _pdl_unit;
   extern gen _pk_unit;
   extern gen _psi_unit;
+  extern gen _ksi_unit;
   extern gen _pt_unit;
   extern gen _qt_unit;
   extern gen _R_unit;

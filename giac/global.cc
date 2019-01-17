@@ -18,7 +18,6 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 using namespace std;
 #ifdef HAVE_SSTREAM
 #include <sstream>
@@ -958,6 +957,36 @@ extern "C" void Sleep(unsigned int miliSecond);
       return _angle_mode_;
   }
 
+  #ifdef BAC_OPTIONS
+
+    static bool _remove_angle_mode_=false;
+    bool remove_angle_mode(){
+      return _remove_angle_mode_;
+    }
+
+    void remove_angle_mode(bool b){
+      _remove_angle_mode_=b;
+    }
+
+    static bool _one_indexed_=false;
+    bool one_indexed(){
+      return _one_indexed_ ? true : false;
+    }
+
+    void one_indexed(bool b){
+      _one_indexed_=b;
+    }
+  #else
+    bool one_indexed(){
+      return false;
+    }
+
+    void one_indexed(bool b){
+      
+    }
+
+  #endif
+
   static bool _show_point_=true;
   bool & show_point(GIAC_CONTEXT){
     if (contextptr && contextptr->globalptr )
@@ -1470,6 +1499,7 @@ extern "C" void Sleep(unsigned int miliSecond);
   }
 
   int array_start(GIAC_CONTEXT){
+    if(one_indexed()) return 1;
     if (contextptr && contextptr->globalptr){
       bool hp38=absint(contextptr->globalptr->_calc_mode_)==38;
       return (!contextptr->globalptr->_python_compat_ && (contextptr->globalptr->_xcas_mode_ || hp38))?1:0;
@@ -3469,6 +3499,10 @@ extern "C" void Sleep(unsigned int miliSecond);
      ptr->globalptr->_autosimplify_=_autosimplify_();
      ptr->globalptr->_lastprog_name_=_lastprog_name_();
      ptr->globalptr->_angle_mode_=_angle_mode_;
+     #ifdef BAC_OPTIONS
+       ptr->globalptr->_one_indexed_=_one_indexed_;
+       ptr->globalptr->_remove_angle_mode_=_remove_angle_mode_;
+     #endif
      ptr->globalptr->_variables_are_files_=_variables_are_files_;
      ptr->globalptr->_bounded_function_no_=_bounded_function_no_;
      ptr->globalptr->_series_flags_=_series_flags_; // bit1= full simplify, bit2=1 for truncation
@@ -3890,6 +3924,9 @@ extern "C" void Sleep(unsigned int miliSecond);
 		     _withsqrt_(true), 
 		     _show_point_(true),  _io_graph_(true),
 		     _all_trig_sol_(false),
+#ifdef BAC_OPTIONS
+         _one_indexed_(false),_remove_angle_mode_(false),
+#endif
 #ifdef WITH_MYOSTREAM
 		     _ntl_on_(true),
 		     _lexer_close_parenthesis_(true),_rpn_mode_(false),_try_parse_i_(true),_specialtexprint_double_(false),_atan_tan_no_floor_(false),_keep_acosh_asinh_(false),_keep_algext_(false),_python_compat_(false),_angle_mode_(0), _bounded_function_no_(0), _series_flags_(0x3),_step_infolevel_(0),_default_color_(FL_BLACK), _epsilon_(1e-12), _proba_epsilon_(1e-15),  _show_axes_(1),_spread_Row_ (-1), _spread_Col_ (-1),_logptr_(&my_CERR),_prog_eval_level_val(1), _eval_level(DEFAULT_EVAL_LEVEL), _rand_seed(123457),_last_evaled_function_name_(0),_currently_scanned_(""),_last_evaled_argptr_(0),_max_sum_sqrt_(3),
@@ -3957,6 +3994,10 @@ extern "C" void Sleep(unsigned int miliSecond);
      _eval_abs_=g._eval_abs_;
      _eval_equaltosto_=g._eval_equaltosto_;
      _complex_mode_=g._complex_mode_;
+     #ifdef BAC_OPTIONS
+       _one_indexed_=g._one_indexed_;
+       _remove_angle_mode_=g._remove_angle_mode_;
+     #endif
      _escape_real_=g._escape_real_;
      _complex_variables_=g._complex_variables_;
      _increasing_power_=g._increasing_power_;
@@ -4585,6 +4626,7 @@ unsigned int ConvertUTF8toUTF16 (
 #define DBG_ARCHIVE 0
 
   bool archive_save(void * f,const gen & g,size_t writefunc(void const* p, size_t nbBytes,size_t NbElements, void *file),GIAC_CONTEXT, bool noRecurse){
+
     // write the gen first
     writefunc(&g,sizeof(gen),1,f);
     if (g.type<=_DOUBLE_ || g.type==_FLOAT_)

@@ -380,7 +380,9 @@
 {"cauchyd",13,9,0,*((ulonglong *) at_cauchyd)},
 {"cauchyd_cdf",13,9,0,*((ulonglong *) at_cauchyd_cdf)},
 {"cauchyd_icdf",13,9,0,*((ulonglong *) at_cauchyd_icdf)},
-{"cd",13,9,0,*((ulonglong *) at_cd)},
+#ifndef BAC_OPTIONS
+  {"cd",13,9,0,*((ulonglong *) at_cd)},
+#endif
 {"cdf",13,9,0,*((ulonglong *) at_cdf)},
 {"cdfplot",13,9,0,*((ulonglong *) at_cdfplot)},
 {"ceil",13,9,0,*((ulonglong *) at_ceil)},
@@ -413,6 +415,7 @@
 {"classes",13,9,0,*((ulonglong *) at_classes)},
 {"clear",13,9,0,*((ulonglong *) at_clear)| 1},
 {"clearscreen",13,126,0,*((ulonglong *) at_clearscreen)},
+{"clear_usual_units",13,9,0,*((ulonglong *) at_clear_usual_units)},
 {"click",13,9,0,*((ulonglong *) at_click)| 1},
 {"close",13,9,0,*((ulonglong *) at_close)| 1},
 {"coeff",13,9,0,*((ulonglong *) at_coeff)},
@@ -506,6 +509,12 @@
 {"debug_infolevel",13,5,0,*((ulonglong *) at_debug_infolevel)},
 {"debut_enregistrement",13,126,0,*((ulonglong *) at_debut_enregistrement)},
 {"decrement",13,9,0,*((ulonglong *) at_decrement)| 1},
+#ifdef BAC_OPTIONS
+  {"default_base",13,9,0,*((ulonglong *) at_default_base)},
+  {"default_units",13,9,0,*((ulonglong *) at_default_units)},
+  {"default_units_coefficient",13,9,0,*((ulonglong *) at_default_units_coefficient)},
+  {"default_units_offset",13,9,0,*((ulonglong *) at_default_units_offset)},
+#endif
 {"degree",13,9,0,*((ulonglong *) at_degree)},
 {"del",13,77,0,*((ulonglong *) at_del)| 1},
 {"delcols",13,9,0,*((ulonglong *) at_delcols)},
@@ -641,6 +650,9 @@
 {"fin_enregistrement",13,126,0,*((ulonglong *) at_fin_enregistrement)},
 {"find",13,9,0,*((ulonglong *) at_find)},
 {"findhelp",13,9,0,*((ulonglong *) at_findhelp)| 1},
+#ifdef BAC_OPTIONS
+  {"first_index",13,9,0,*((ulonglong *) at_first_index)},
+#endif
 {"fisher",13,9,0,*((ulonglong *) at_fisher)},
 {"fisher_cdf",13,9,0,*((ulonglong *) at_fisher_cdf)},
 {"fisher_icdf",13,9,0,*((ulonglong *) at_fisher_icdf)},
@@ -703,7 +715,11 @@
 {"ggbsort",13,9,0,*((ulonglong *) at_ggbsort)},
 {"giac",13,9,0,*((ulonglong *) at_giac)},
 {"goto",13,77,0,*((ulonglong *) at_goto)},
-{"grad",13,9,0,*((ulonglong *) at_grad)| 1},
+#ifdef BAC_OPTIONS
+	{"gradient",13,9,0,*((ulonglong *) at_grad)| 1}, // Avoid conflict with _grad unit
+#else
+	{"grad",13,9,0,*((ulonglong *) at_grad)| 1},
+#endif
 {"gramschmidt",13,9,0,*((ulonglong *) at_gramschmidt)},
 {"graph2tex",13,9,0,*((ulonglong *) at_graph2tex)},
 {"graph3d2tex",13,9,0,*((ulonglong *) at_graph3d2tex)},
@@ -977,6 +993,13 @@
 {"minimize",13,9,0,*((ulonglong *) at_minimize)},
 {"mkisom",13,9,0,*((ulonglong *) at_mkisom)},
 {"mksa",13,9,0,*((ulonglong *) at_mksa)},
+#ifdef BAC_OPTIONS
+  {"mksa_base",13,9,0,*((ulonglong *) at_mksa_base)},
+  {"mksa_base_first",13,9,0,*((ulonglong *) at_mksa_base_first)},
+  {"mksa_coefficient",13,9,0,*((ulonglong *) at_mksa_coefficient)},
+  {"mksa_offset",13,9,0,*((ulonglong *) at_mksa_offset)},
+  {"mksa_remove",13,9,0,*((ulonglong *) at_mksa_remove)},
+#endif
 {"modgcd",13,9,0,*((ulonglong *) at_modgcd)},
 {"modgcd_cachesize",13,9,0,*((ulonglong *) at_modgcd_cachesize)},
 {"modp",13,9,0,*((ulonglong *) at_modp)},
@@ -991,6 +1014,7 @@
 {"mult_conjugate",13,9,0,*((ulonglong *) at_mult_conjugate)},
 {"multcrement",13,9,0,*((ulonglong *) at_multcrement)| 1},
 {"multinomial",13,9,0,*((ulonglong *) at_multinomial)},
+{"multi_regression",13,9,0,*((ulonglong *) at_multi_regression)},
 {"multiplier_conjugue",13,9,0,*((ulonglong *) at_multiplier_conjugue)},
 {"multiplier_conjugue_complexe",13,9,0,*((ulonglong *) at_multiplier_conjugue_complexe)},
 {"multiply",13,9,0,*((ulonglong *) at_multiply)},
@@ -1035,6 +1059,9 @@
 {"odd",13,9,0,*((ulonglong *) at_odd)},
 {"odeplot",13,9,0,*((ulonglong *) at_odeplot)},
 {"odesolve",13,9,0,*((ulonglong *) at_odesolve)},
+#ifdef BAC_OPTIONS
+  {"one_index",13,9,0,*((ulonglong *) at_one_index)},
+#endif
 {"op",13,9,0,*((ulonglong *) at_op)},
 {"open",13,9,0,*((ulonglong *) at_open)},
 {"open_polygon",13,9,0,*((ulonglong *) at_open_polygon)},
@@ -1314,6 +1341,9 @@
 {"series",13,9,0,*((ulonglong *) at_series)},
 {"set_language",13,9,0,*((ulonglong *) at_set_language)},
 {"set_pixel",13,9,0,*((ulonglong *) at_set_pixel)},
+#ifdef BAC_OPTIONS
+	{"set_units",13,9,0,*((ulonglong *) at_set_units)},
+#endif
 {"shift",13,9,0,*((ulonglong *) at_shift)},
 {"shift_phase",13,9,0,*((ulonglong *) at_shift_phase)},
 {"show",13,9,0,*((ulonglong *) at_show)},
@@ -1483,9 +1513,15 @@
 {"uniformd_cdf",13,9,0,*((ulonglong *) at_uniformd_cdf)},
 {"uniformd_icdf",13,9,0,*((ulonglong *) at_uniformd_icdf)},
 {"unitV",13,9,0,*((ulonglong *) at_unitV)},
+#ifdef BAC_OPTIONS
+{"unit_remove",13,9,0,*((ulonglong *) at_unit_remove)},
+#endif
 {"unquote",13,9,0,*((ulonglong *) at_unquote)},
 {"upper",13,9,0,*((ulonglong *) at_upper)},
 {"usimplify",13,9,0,*((ulonglong *) at_usimplify)},
+#ifdef BAC_OPTIONS
+{"usimplify_base",13,9,0,*((ulonglong *) at_usimplify_base)},
+#endif
 {"valuation",13,9,0,*((ulonglong *) at_valuation)},
 {"vandermonde",13,9,0,*((ulonglong *) at_vandermonde)},
 {"variance",13,9,0,*((ulonglong *) at_variance)},

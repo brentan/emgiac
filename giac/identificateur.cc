@@ -18,6 +18,9 @@
  *  along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 using namespace std;
+#ifdef BAC_OPTIONS
+  #include "emscripten.h"
+#endif
 #include <cmath>
 #include <fstream>
 #include <string>
@@ -1098,7 +1101,7 @@ namespace giac {
       // now at global level
       // check for quoted
       if (cur->quoted_global_vars && !cur->quoted_global_vars->empty() && equalposcomp(*cur->quoted_global_vars,orig)) 
-	return false;
+	      return false;
       // If 38 is there, look again, but now it is allowed to look at local and globals!
       if (storcl_38!=NULL && !No38Lookup && abs_calc_mode(contextptr)==38 && storcl_38(evaled,NULL,id_name,undef,false,contextptr, NULL, false))
 	return true;
@@ -1106,20 +1109,52 @@ namespace giac {
       sym_tab::const_iterator it=cur->tabptr->find(id_name);
       if (it==cur->tabptr->end()){
         //if (No38Lookup) return false;
-	//if (storcl_38 && abs_calc_mode(contextptr)==38)
-	//  return eval_38(level,orig,evaled,id_name,contextptr);
-	return false;
+      	//if (sto_38 && abs_calc_mode(contextptr)==38)
+      	//  return eval_38(level,orig,evaled,id_name,contextptr);
+        #ifdef BAC_OPTIONS
+          // What is the first index?
+          if(strcmp(id_name,"firstIndex") == 0) {
+            evaled = one_indexed() ? plus_one : zero;
+            return true;
+          }
+          // CODE ADDED TO CALL OUTSIDE FUNCTION 'eval_function' AND TEST FOR PRESENCE OF THIS VARIABLE...IF SO, RETURN VALUE!
+          if(strstr(id_name, "BACAPPSMETHOD") != NULL) {
+            std::string asm_code;
+            std::string method_call = id_name;
+            asm_code += "eval_function( ";
+            size_t pos = 0;
+            while((pos = method_call.find("'", pos)) != std::string::npos) {
+              method_call.replace(pos, 1, "\\'");
+              pos += 2;
+            }
+            asm_code += "'";
+            asm_code += method_call;
+            asm_code += "'";
+            asm_code += " );";
+            std::string out = emscripten_run_script_string( asm_code.data() );
+            if(out.length() > 0) {
+              if(out.compare(0,5,"ERROR") == 0)
+                evaled = gensizeerr(out.substr(7,string::npos));
+              else
+                evaled = expand(gen(out, contextptr),contextptr);
+              return true;
+            }
+          }
+        #endif
+      	return false;
       }
       else {
-	if (!it->second.in_eval(level,evaled,contextptr->globalcontextptr))
-	  evaled=it->second;
-	return true;
+      	if (!it->second.in_eval(level,evaled,contextptr->globalcontextptr)) {
+          evaled=it->second;
+        }
+      	return true;
       }
       //if (!No38Lookup && storcl_38){ //  && abs_calc_mode(contextptr)==38)
       //   if (eval_38(level,orig,evaled,id_name,contextptr))
       //      return true;
       //}
     }
+
     if (local_eval(contextptr) && localvalue && !localvalue->empty()){
       evaled=do_local_eval(*this,level,true);
       return true;

@@ -1,4 +1,5 @@
 // -*- mode:C++ ; compile-command: "emcc opengl.cc -I. -I.. -DHAVE_CONFIG_H -DIN_GIAC -DGIAC_GENERIC_CONSTANTS -DNO_STDEXCEPT -Os -s ALLOW_MEMORY_GROWTH=1 -s LEGACY_GL_EMULATION=1" -*-
+
 #ifndef GIAC_GGB
 
 #include "opengl.h"
@@ -22,6 +23,7 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
+#ifndef BAC_OPTIONS
 
 #ifdef EMCC_GLUT
 #include <GL/glut.h>
@@ -55,8 +57,10 @@
 #include <png.h>
 #endif
 
+#endif
 using namespace std;
 using namespace giac;
+#ifndef BAC_OPTIONS
 
 #ifdef EMCC
 // missing from emscripten
@@ -4309,6 +4313,7 @@ void freeglutStrokeCharacter( int character )
 #ifndef NO_NAMESPACE_GIAC
 } // namespace giac
 #endif // ndef NO_NAMESPACE_GIAC
+#endif // BAC_OPTIONS
 
 #ifdef EMCC
 #ifdef GIAC_GGB

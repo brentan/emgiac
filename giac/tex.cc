@@ -187,6 +187,10 @@ namespace giac {
   // dimension of the LaTeX output figures default 12 cm x 12 cm
   double horiz_latex=12.;
   double vert_latex=12.;
+  #ifdef BAC_OPTIONS
+    bool unit_mode = false;
+    bool function_mode = false;
+  #endif
   const char tex_preamble[]="\\documentclass{article} \n\\usepackage{pst-plot,color} \n\\usepackage{graphicx} \n\\begin{document}\n";
 #ifdef RTOS_THREADX
   const char tex_color[]="";
@@ -196,6 +200,10 @@ namespace giac {
   const char tex_end[]="\n\\end{document}";
   const char mbox_begin[]="\\mathrm{"; // ("\\mbox{");
   const char mbox_end[]="}";
+  #ifdef BAC_OPTIONS
+    const char opname_begin[]="\\operatorname{";
+    const char opname_end[]="}";
+  #endif
 
   string spread2tex(const matrice & m,int formule,GIAC_CONTEXT){
     int l=int(m.size());
@@ -262,38 +270,108 @@ namespace giac {
 
   static string matrix2tex(const matrice & m,GIAC_CONTEXT){
     int l=int(m.size());
-    if (!l)
-      return string("()");
+    #ifdef BAC_OPTIONS
+      string s;
+    #endif
+    if (!l) {
+      #ifdef BAC_OPTIONS
+        char str1[256];
+        sprintf(str1, "%d", giac::matrix_depth);
+        s += "\\begin{bmatrix";
+        s += str1;
+        s += "}\\end{bmatrix";
+        s += str1;
+        s += "}";
+        return s;
+      #else
+        return string("()");
+      #endif
+    }
     int c=int(m.front()._VECTptr->size());
-    string s("\\left(\\begin{array}{");
-    for (int j=0;j<c;++j)
-      s += 'c';
-    s += "}\n";
+    #ifdef BAC_OPTIONS
+      char str2[256];
+      sprintf(str2, "%d", giac::matrix_depth);
+      s += "\\begin{bmatrix";
+      s += str2;
+      s += "}";
+      giac::matrix_depth++;
+    #else
+      string s("\\left(\\begin{array}{");
+      for (int j=0;j<c;++j)
+        s += 'c';
+      s += "}\n";
+    #endif
     for (int i=0;i<l;++i){
       for (int j=0;j<c;++j){
-	  s += gen2tex(m[i][j],contextptr) ;
-	  if (j!=c-1)
-	    s += " & ";
+    	  s += gen2tex(m[i][j],contextptr) ;
+    	  if (j!=c-1) 
+          s += " & ";
       }
       if (i!=l-1)
-	s += " \\\\";
+	      s += " \\\\";
       s+='\n';
     }
-    s += "\\end{array}\\right) ";
+    #ifdef BAC_OPTIONS
+      giac::matrix_depth--;
+      char str3[256];
+      sprintf(str3, "%d", giac::matrix_depth);
+      s += "\\end{bmatrix";
+      s += str3;
+      s += "} ";
+    #else
+      s += "\\end{array}\\right) ";
+    #endif
     return s;
   }
 
   static string _VECT2tex(const vecteur & v,int subtype,GIAC_CONTEXT){
-    string s(begin_VECT_string(subtype,true,contextptr));
+    string s;
     vecteur::const_iterator it=v.begin(),itend=v.end();
-    for (;it!=itend;){
-      s += gen2tex(*it,contextptr);
-      ++it;
-      if (it!=itend)
-	s += ',';
-    }
-    s += end_VECT_string(subtype,true,contextptr);
-    return s;
+    #ifdef BAC_OPTIONS
+      switch (subtype) {
+      case _POLY1__VECT: {
+          // Lets turn this back into a polynomial...assume 'x' as variable
+          int count = v.size()-1;
+          char str[8];
+          for (;it!=itend;){
+            s += gen2tex(*it,contextptr);
+            if(count > 1) {
+              sprintf(str, "%d", count);
+              s += " \\cdot x^{";
+              s += str;
+              s += "}";
+            } else if(count == 1)
+              s += " \\codt x";
+            count--;
+            ++it;
+            if (it!=itend)
+              s += " + ";
+          }
+          return s;
+        }
+      default: {
+          s += begin_VECT_string(subtype,true,contextptr);
+          for (;it!=itend;){
+            s += gen2tex(*it,contextptr);
+            ++it;
+            if (it!=itend)
+              s += mid_VECT_string(subtype,true,contextptr);
+          }
+          s += end_VECT_string(subtype,true,contextptr);
+          return s;
+        }
+      }
+    #else
+      s += begin_VECT_string(subtype,true,contextptr);
+      for (;it!=itend;){
+        s += gen2tex(*it,contextptr);
+        ++it;
+        if (it!=itend)
+          s += ',';
+      }
+      s += end_VECT_string(subtype,true,contextptr);
+      return s;
+    #endif
   }
 
   static string prod_vect2tex(const vecteur & v,GIAC_CONTEXT){
@@ -303,18 +381,26 @@ namespace giac {
     string s;
     for (;;){
       if ( (it->type==_CPLX && !is_zero(*it->_CPLXptr) && !is_zero(*(it->_CPLXptr+1))) || (it->type==_SYMB && ( it->_SYMBptr->sommet==at_plus || (it->_SYMBptr->sommet==at_neg && need_parenthesis(it->_SYMBptr->feuille)) ) ) )
-	s += string("(")+gen2tex(*it,contextptr)+string(")");
+        #ifdef BAC_OPTIONS
+	 s += string("\\left(")+gen2tex(*it,contextptr)+string("\\right)");
+        #else
+         s += string("(")+gen2tex(*it,contextptr)+string(")");
+        #endif
       else 
 	s += gen2tex(*it,contextptr);
       ++it;
       if (it==itend)
 	return s;
+#ifdef BAC_OPTIONS
+        s += "\\cdot ";
+#else
       if (it->type<=_IDNT || (it->type==_SYMB && 
 			      (it->_SYMBptr->sommet==at_neg || (it->_SYMBptr->sommet.ptr()->printsommet && it->_SYMBptr->feuille.type==_VECT && !it->_SYMBptr->feuille._VECTptr->empty() && it->_SYMBptr->feuille._VECTptr->front().type<=_IDNT))
 			      )) // second part of the test added for e.g. latex('2*3*5^2')
 	s += "\\cdot ";
       else
 	s += " ";
+#endif
     }
   }
 
@@ -612,66 +698,138 @@ namespace giac {
     return res;
   }
 
-
-  static string idnt2tex(const string & sorig,bool & mathmode){
-    string s0;
-    mathmode=greek2tex(sorig,s0,true)!=0;
-    if (mathmode)
-      return s0;
-    mathmode=true;
+  static string convertToGreek(string s0, bool & mathmode) {
     int n=int(s0.size()),j;
     for (j=n-1;j>=2;--j){
       if (s0[j]>32 && isalpha(s0[j]))
-	break;
+        break;
     }
     string s=s0.substr(0,j+1),sadd;
     if (j<n-1)
       sadd=s0.substr(j+1,n-1-j);
     switch (s.size()){
-    case 2:
-      if (s=="mu" || s=="nu" || s=="pi" || s=="xi" || s=="Xi")
-	return "\\"+s+sadd;
-      if (s=="im")
-	return "\\Im"+s+sadd;
-      if (s=="re")
-	return "\\Re"+sadd;
-      break;
-    case 3:
-      if (s=="chi" || s=="phi" || s=="Phi" || s=="eta" || s=="rho" || s=="tau" || s=="psi" || s=="Psi")
-	return "\\"+s+sadd;
-      break;
-    case 4:
-      if (s=="beta" || s=="zeta")
-	return "\\"+s+sadd;
-      break;
-    case 5:
-      if (s=="alpha" || s=="delta" || s=="Delta" || s=="gamma" || s=="Gamma" || s=="kappa" || s=="theta" || s=="Theta" || s=="sigma" || s=="Sigma" || s=="Omega" || s=="omega" || s=="aleph")
-	return "\\"+s+sadd;      
-      break;
-    case 6:
-      if (s=="lambda" || s=="Lambda" || s=="approx")
-	return "\\"+s+sadd;      
-      break;
-    case 7:
-      if (s=="epsilon" || s=="product")
-	return "\\"+s+sadd;      
+      case 2:
+        if (s=="mu" || s=="nu" || s=="pi" || s=="xi" || s=="Xi")
+          return "\\"+s+sadd;
+        if (s=="im")
+          return "\\Im"+s+sadd;
+        if (s=="re")
+          return "\\Re"+sadd;
+        break;
+      case 3:
+        if (s=="chi" || s=="phi" || s=="Phi" || s=="eta" || s=="rho" || s=="tau" || s=="psi" || s=="Psi")
+          return "\\"+s+sadd;
+        break;
+      case 4:
+        if (s=="beta" || s=="zeta")
+          return "\\"+s+sadd;
+        break;
+      case 5:
+        if (s=="alpha" || s=="delta" || s=="Delta" || s=="gamma" || s=="Gamma" || s=="kappa" || s=="theta" || s=="Theta" || s=="sigma" || s=="Sigma" || s=="Omega" || s=="omega" || s=="aleph")
+          return "\\"+s+sadd;      
+        break;
+      case 6:
+        if (s=="lambda" || s=="Lambda" || s=="approx")
+          return "\\"+s+sadd;      
+        break;
+      case 7:
+        if (s=="epsilon" || s=="product")
+          return "\\"+s+sadd;      
       break;
     }
     mathmode=false;
     return s0;
   }
 
+  static string escapeUnderscore(const string s0) {
+    std::size_t found_index;
+#ifdef BAC_OPTIONS
+    // Change variable decorations, which have syntax ___NAME___ within the variable, to appropriate syntax:
+    found_index = s0.find_last_of("~");  
+    if(found_index != std::string::npos) {
+      std::string before, command, after;
+      before = s0.substr(0,found_index);
+      after = s0.substr(found_index+1,std::string::npos);
+      found_index = before.find_last_of("~");
+      if(found_index != std::string::npos) {
+        // THIS SHOULD ALWAYS HAPPEN
+        command = before.substr(found_index+1,std::string::npos);
+        before = before.substr(0,found_index);
+        return "\\over" + command + "{" + escapeUnderscore(before) + "}" + escapeUnderscore(after);
+      }
+    }
+#endif
+    found_index = s0.find_first_of("_"); 
+    if(found_index == std::string::npos)
+      return s0;
+    else if(s0.substr(found_index+1,std::string::npos).size() < 2)
+      return s0;
+    else
+      return s0.substr(0,found_index) + "_{" + s0.substr(found_index+1,std::string::npos) + "}";
+  }
+
+  static string idnt2tex(const string & sorig,bool & mathmode){
+    string s0;
+    mathmode=greek2tex(sorig,s0,true)!=0;
+    #ifdef BAC_OPTIONS
+      if (mathmode && !giac::unit_mode)
+    #else
+      if(mathmode)
+    #endif
+      return s0;
+    mathmode=true;
+    #ifdef BAC_OPTIONS
+      std::size_t found_index = s0.find_first_of("_"); 
+      if(found_index == std::string::npos)
+        s0= convertToGreek(s0, mathmode);
+      else
+        s0= convertToGreek(s0.substr(0,found_index), mathmode) + "_" + convertToGreek(s0.substr(found_index+1,std::string::npos), mathmode);
+      mathmode = false;
+      return s0;
+    #else
+      return convertToGreek(s0, mathmode);
+    #endif
+  }
+
   static string idnt2tex(const string & e){
     bool mathmode;
-    if (e.size()==3 && (e=="sin" || e=="cos" || e=="tan" || e=="exp" || e=="log"))
+    if (e.size()==3 && (e=="sin" || e=="cos" || e=="tan" || e=="exp" || e=="log")) 
       return "\\"+e;
     if (e.size()==2 && (e=="ln"))
       return "\\"+e;
-    string s=idnt2tex(e,mathmode);
-    if (mathmode || s.size()==1)
-      return s;
-    else
-      return mbox_begin+translate_underscore(s)+mbox_end;
+    #ifdef BAC_OPTIONS
+      if(giac::unit_mode) {
+        string s = e;
+        //if(s.compare(string("_")) == 0)
+        s.erase(0,1);
+        if ((s.size()== 6) && (s=="deltaF" || s=="deltaC" || s=="deltaK"))
+          return "\\"+s;
+        if ((s.size()== 4) && (s=="degF" || s=="degC"))
+          return "\\"+s;
+        if ((s.size()== 7) && (s=="absdegF"))
+          return "\\degF";
+        if ((s.size()== 7) && (s=="absdegC"))
+          return "\\degC";
+        if ((s.size()== 12) && (s=="deltaRankine"))
+          return "\\"+s;
+        return s;
+      }
+      string s = idnt2tex(e,mathmode);
+      if (mathmode)
+        return s;
+      else if(s.compare(string("_")) == 0)
+        return string("");
+      else if(giac::function_mode)
+        return opname_begin + escapeUnderscore(s) + opname_end;  //mbox_begin+translate_underscore(s)+mbox_end;
+      else 
+        return escapeUnderscore(s);
+    #else
+      string s=idnt2tex(e,mathmode);
+      if (mathmode || s.size()==1)
+        return s;
+      else
+        return mbox_begin+translate_underscore(s)+mbox_end;
+    #endif
   }
 
   static string idnt2tex(const gen & e,GIAC_CONTEXT){
@@ -1204,16 +1362,28 @@ namespace giac {
 	  return opstring+gen2tex(feu,contextptr) ;
 	return opstring+string("\\left(") + gen2tex(feu,contextptr) +string("\\right)");
       }
+#ifdef BAC_OPTIONS
+      if (mys.sommet==at_inv && (feu.is_symb_of_sommet(at_prod) || feu.is_symb_of_sommet(at_plus) || giac::unit_mode || feu.type<=_IDNT) ){
+#else
       if (mys.sommet==at_inv && (feu.is_symb_of_sommet(at_prod) || feu.is_symb_of_sommet(at_plus) || feu.is_symb_of_sommet(at_pow) || feu.type<=_IDNT) ){
-	if (feu.type==_IDNT)
-	  return gen2tex(feu,contextptr)+"^{-1}";
+  if (feu.type==_IDNT)
+    return gen2tex(feu,contextptr)+"^{-1}";
+#endif
 	return string("\\frac{1}{") + gen2tex(feu,contextptr) +string("}");
       }
-      return opstring + "\\left(" + gen2tex(feu,contextptr) +"\\right)" ;
+      #ifdef BAC_OPTIONS
+        return opstring + "\\left({" + gen2tex(feu,contextptr) +"}\\right)" ;
+      #else
+        return opstring + "\\left(" + gen2tex(feu,contextptr) +"\\right)" ;
+      #endif
     }
     string s;
     int l=int(feu._VECTptr->size());
+#ifdef BAC_OPTIONS
+    if (( mys.sommet==at_plus ) || (mys.sommet == at_pointplus) || (mys.sommet == at_pointminus)) {
+#else
     if ( mys.sommet==at_plus ){
+#endif
       for (int i=0;i<l;++i){
 	gen e((*(feu._VECTptr))[i]);
 	if ((e.type==_SYMB) && (e._SYMBptr->sommet==at_neg)){
@@ -1231,6 +1401,10 @@ namespace giac {
 	    if (i){
 	      if (opstring=="+" && !sadd.empty() && sadd[0]=='-')
 		;
+#ifdef BAC_OPTIONS
+              else if(opstring == ".+") s += "+";
+              else if(opstring == ".-") s += "-";
+#endif
 	      else
 		s += opstring;
 	    }
@@ -1281,27 +1455,116 @@ namespace giac {
 	res ="\\left("+res+"\\right)";
       return res+"^{"+gen2tex(v.back(),contextptr)+'}';
     }
-    s = opstring +"\\left(";
-    for (int i=0;;++i){
-      s += gen2tex((*(feu._VECTptr))[i],contextptr);
-      if (i==l-1)
-	return s+"\\right)";
-      s += ',';
-    }
+    #ifndef BAC_OPTIONS
+      s = opstring +"\\left(";
+      for (int i=0;;++i){
+        s += gen2tex((*(feu._VECTptr))[i],contextptr);
+        if (i==l-1)
+  	     return s+"\\right)";
+        s += ',';
+      }
+    #else
+      if(mys.sommet == at_unit) {
+        if(need_parenthesis((*(feu._VECTptr))[0]))
+          s = "\\left(" + gen2tex((*(feu._VECTptr))[0],contextptr) + "\\right)";
+        else
+          s = gen2tex((*(feu._VECTptr))[0],contextptr);
+        giac::unit_mode = true;
+        std::string s2 = gen2tex((*(feu._VECTptr))[1],contextptr);
+        giac::unit_mode = false;
+        if(s2.compare("1.0")==0) return s;
+        else return s+" \\Unit{"+s2+"}";
+      } else {
+        s = opstring +"\\left(";
+        for (int i=0;;++i){
+          s += gen2tex((*(feu._VECTptr))[i],contextptr);
+          if (i==l-1)
+           return s+"\\right)";
+          s += ',';
+        }
+      }
+    #endif
   }
+
+  static string cplx2tex(const gen & e,GIAC_CONTEXT) {
+      if (is_exactly_zero(*(e._CPLXptr+1)))
+        return e._CPLXptr->print(contextptr);
+      if (*complex_display_ptr(e) &1){
+#ifdef BCD
+        if (e._CPLXptr->type==_FLOAT_ && (e._CPLXptr+1)->type==_FLOAT_)
+#ifdef GIAC_HAS_STO_38  
+          return abs(e,contextptr).print(contextptr)+"\xe2\x88\xa1"+print_FLOAT_(atan2f(e._CPLXptr->_FLOAT_val,(e._CPLXptr+1)->_FLOAT_val,angle_radian(contextptr)?AMRad:AMDeg),contextptr);
+#else   
+        return abs(e,contextptr).print(contextptr)+"\xe2\x88\xa1"+print_FLOAT_(atan2f(e._CPLXptr->_FLOAT_val,(e._CPLXptr+1)->_FLOAT_val,angle_radian(contextptr)),contextptr);
+#endif
+#endif
+        // return abs(e,contextptr).print(contextptr)+"\xe2\x88\xa1"+(angle_radian(contextptr)?arg(e,contextptr):arg(e,contextptr)*rad2deg_g).print(contextptr);
+        return abs(e,contextptr).print(contextptr)+"\xe2\x88\xa1"+arg(e,contextptr).print(contextptr);
+      }
+      if (is_exactly_zero(*e._CPLXptr)){
+        if (is_one(*(e._CPLXptr+1)))
+          return printi(contextptr);
+        if (is_minus_one(*(e._CPLXptr+1)))
+          return (abs_calc_mode(contextptr)==38?string("−"):string("-"))+printi(contextptr);
+        return ((e._CPLXptr+1)->print(contextptr) + string("\\cdot "))+printi(contextptr);
+      }
+      if (is_one(*(e._CPLXptr+1)))
+        return (e._CPLXptr->print(contextptr) + string("+"))+printi(contextptr);
+      if (is_minus_one(*(e._CPLXptr+1)))
+        return (e._CPLXptr->print(contextptr) + string("-"))+printi(contextptr);
+      if (is_positive(-(*(e._CPLXptr+1)),contextptr))
+        return (e._CPLXptr->print(contextptr) + string("-") + (-(*(e._CPLXptr+1))).print(contextptr) + "\\cdot ")+printi(contextptr);
+      return (e._CPLXptr->print(contextptr) + string("+") + (e._CPLXptr+1)->print(contextptr) + "\\cdot ")+printi(contextptr);
+  }
+
+#ifdef BAC_OPTIONS
+  string doub2tex(const gen & g, GIAC_CONTEXT) {
+    std::string s, b, e;
+    s = g.print(contextptr);
+    b = "";
+    e = "";
+    bool scientific = false;
+    bool added_nonzero = false;
+    for (int i=0;s[i];++i){
+      if (s[i]=='e' || s[i]=='E')  {
+        scientific = true;
+      } else if(scientific && added_nonzero && (s[i]!='+')) {
+        e += s[i];
+      } else if(scientific && (s[i]!='0') && (s[i]!='+')) {
+        e += s[i];
+        added_nonzero = true;
+      } else if(!scientific)
+        b += s[i];
+    }
+    if(scientific) 
+      return " \\scientificNotation{" + b + "}{" + e + "}";
+    else
+      return s;
+  }
+#endif
 
   // assume math mode enabled
   string gen2tex(const gen & e,GIAC_CONTEXT){
     switch (e.type){
+#ifdef BAC_OPTIONS
+    case _REAL:
+      return doub2tex(real2double(e), contextptr);
+    case _INT_: case _ZINT: 
+#else
     case _INT_: case _ZINT: case _REAL:
+#endif
       return e.print(contextptr);
     case _DOUBLE_:
       if (specialtexprint_double(contextptr))
 	return double2tex(e._DOUBLE_val);
-      else
+      else 
+#ifdef BAC_OPTIONS
+        return doub2tex(e, contextptr);
+#else
 	return e.print(contextptr);
+#endif
     case _CPLX:
-      return e.print(contextptr);
+      return cplx2tex(e, contextptr); //e.print(contextptr);
     case _IDNT:
       return idnt2tex(e,contextptr);
     case _SYMB:

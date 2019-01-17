@@ -1775,9 +1775,17 @@ namespace giac {
 
   gen _nrows(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
+#ifdef BAC_OPTIONS
+    if(g.type != _VECT) return gensizeerr(contextptr);
+    matrice g2 = vecteur2matrice(*g._VECTptr);
+    if (!ckmatrix(g2))
+      return gensizeerr(contextptr);
+    return int(g2.size());
+#else
     if (!ckmatrix(g))
       return gensizeerr(contextptr);
     return int(g._VECTptr->size());
+#endif
   }
   static const char _nrows_s []="nrows";
   static define_unary_function_eval (__nrows,&_nrows,_nrows_s);
@@ -1785,11 +1793,21 @@ namespace giac {
 
   gen _ncols(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
+#ifdef BAC_OPTIONS
+    if(g.type != _VECT) return gensizeerr(contextptr);
+    matrice g2 = vecteur2matrice(*g._VECTptr);
+    if (!ckmatrix(g2))
+      return gensizeerr(contextptr);
+    if (g2.empty())
+      return zero;
+    return int(g2.front()._VECTptr->size());
+#else
     if (!ckmatrix(g))
       return gensizeerr(contextptr);
     if (g._VECTptr->empty())
       return zero;
     return int(g._VECTptr->front()._VECTptr->size());
+#endif
   }
   static const char _ncols_s []="ncols";
   static define_unary_function_eval (__ncols,&_ncols,_ncols_s);
@@ -3273,6 +3291,9 @@ static define_unary_function_eval (__correlation,&_correlation,_correlation_s);
     if (!ckmatrix(gv))
       return gensizeerr(contextptr);
     vecteur & v = *gv._VECTptr;
+#ifdef BAC_OPTIONS
+    v = mksa_value(v,contextptr);
+#endif
     gen n;
     gen sigmax,sigmay,sigmaxy,sigmax2,sigmay2,tmpx,tmpy;
     if (freqcol<-1){
@@ -3368,9 +3389,27 @@ static define_unary_function_eval (__correlation,&_correlation,_correlation_s);
     return gen(makevecteur(a,b),_SEQ__VECT);
   }
 
-  gen _linear_regression(const gen & g,GIAC_CONTEXT){
+  gen _linear_regression_direct(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
     return function_regression(g,zero,zero,contextptr);
+  }
+  gen _linear_regression(const gen & g,GIAC_CONTEXT){
+    if ( g.type==_STRNG && g.subtype==-1) return  g;
+#ifdef BAC_OPTIONS
+      remove_angle_mode(true);
+      gen res = function_regression(g,zero,zero,contextptr);
+      remove_angle_mode(false);
+      if (res.type==_VECT && res._VECTptr->size()==2){
+        vecteur v(*res._VECTptr);
+        if(is_one(mksa_base_first(g._VECTptr->front(),contextptr)))
+          res = (v[1] + v[0] * gen("x",contextptr)) * mksa_base_first(g._VECTptr->back(),contextptr);
+        else
+          res = (v[1] + v[0] * gen("mksa(x)",contextptr) / mksa_base_first(g._VECTptr->front(),contextptr)) * mksa_base_first(g._VECTptr->back(),contextptr);
+        return symb_program(gen("x",contextptr),zero,res,contextptr);
+      } else return res;
+#else
+    return function_regression(g,zero,zero,contextptr);
+#endif
   }
   static const char _linear_regression_s []="linear_regression";
 static define_unary_function_eval (__linear_regression,&_linear_regression,_linear_regression_s);
@@ -3379,7 +3418,21 @@ static define_unary_function_eval (__linear_regression,&_linear_regression,_line
 
   gen _exponential_regression(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
+#ifdef BAC_OPTIONS
+      remove_angle_mode(true);
+      gen res = exp(function_regression(g,zero,at_ln,contextptr),contextptr);
+      remove_angle_mode(false);
+      if (res.type==_VECT && res._VECTptr->size()==2){
+        vecteur v(*res._VECTptr);
+        if(is_one(mksa_base_first(g._VECTptr->front(),contextptr)))
+          res = v[1] * mksa_base_first(g._VECTptr->back(),contextptr) * pow(v[0],gen("x",contextptr) ,contextptr);
+        else
+          res = v[1] * mksa_base_first(g._VECTptr->back(),contextptr) * pow(v[0],gen("mksa(x)",contextptr) / mksa_base_first(g._VECTptr->front(),contextptr),contextptr);
+        return symb_program(gen("x",contextptr),zero,res,contextptr);
+      } else return res;
+#else
     return exp(function_regression(g,zero,at_ln,contextptr),contextptr);
+#endif
   }
   static const char _exponential_regression_s []="exponential_regression";
 static define_unary_function_eval (__exponential_regression,&_exponential_regression,_exponential_regression_s);
@@ -3387,19 +3440,199 @@ static define_unary_function_eval (__exponential_regression,&_exponential_regres
 
   gen _logarithmic_regression(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
+#ifdef BAC_OPTIONS
+      remove_angle_mode(true);
+      gen res = function_regression(g,at_ln,zero,contextptr);
+      remove_angle_mode(false);
+      if (res.type==_VECT && res._VECTptr->size()==2){
+        vecteur v(*res._VECTptr);
+        if(is_one(mksa_base_first(g._VECTptr->front(),contextptr)))
+          res = v[0] * mksa_base_first(g._VECTptr->back(),contextptr) * (ln(gen("x",contextptr),contextptr) + v[1]/v[0]);
+        else
+          res = v[0] * mksa_base_first(g._VECTptr->back(),contextptr) * (ln(gen("mksa(x)",contextptr) / mksa_base_first(g._VECTptr->front(),contextptr),contextptr) + v[1]/v[0]);
+        return symb_program(gen("x",contextptr),zero,res,contextptr);
+      } else return res;
+#else
     return function_regression(g,at_ln,zero,contextptr);
+#endif
   }
   static const char _logarithmic_regression_s []="logarithmic_regression";
 static define_unary_function_eval (__logarithmic_regression,&_logarithmic_regression,_logarithmic_regression_s);
   define_unary_function_ptr5( at_logarithmic_regression ,alias_at_logarithmic_regression,&__logarithmic_regression,0,true);
 
+  gen _multi_regression(const gen & args, GIAC_CONTEXT) {
+    // Calculate the multiple linear regression for a data set based on a number of independent parameters and associated weights
+    if ( args.type==_STRNG &&  args.subtype==-1) return args;
+    if (args.type!=_VECT) 
+      return gensizeerr(contextptr);
+    vecteur & v=*args._VECTptr;
+#ifdef BAC_OPTIONS
+    vecteur x_units;
+    vecteur & xv = *(v[1])._VECTptr;
+    const_iterateur it=xv.begin(),itend=xv.end();
+    x_units.reserve(itend-it);
+    for (;it!=itend;++it) 
+      x_units.push_back(mksa_base_first(*it,contextptr));
+    gen y_units = mksa_base_first(v[0],contextptr);
+    v = mksa_value(v,contextptr);
+#endif
+
+    // Consistency check
+    if ((int(v.size()) > 4) || (int(v.size()) < 2))
+      return gensizeerr(gettext("2 to 4 arguments required"));
+    if (v[0].type!=_VECT)
+      return gensizeerr(gettext("Invalid y-data"));
+    if (!ckmatrix(v[1]))
+      return gensizeerr(gettext("Invalid x-data"));
+    if ((int(v.size()) == 4) && (v[3].type!=_VECT))
+      return gensizeerr(gettext("Invalid weight vector"));
+    if((int(v.size()) == 4) && (int(v[0]._VECTptr->size()) != int(v[3]._VECTptr->size())))
+      return gensizeerr(gettext("weight vector and data vector must be of same size"));
+    if(int(v[0]._VECTptr->size()) != v[1]._VECTptr->front()._VECTptr->size())
+      return gensizeerr(gettext("x matrix must have same number of columns as data vector"));
+
+    // Inputs are expected as:
+    // Y = array of j observed data points
+    // X = matrix of independent variables, with each row representing an independent variable
+    // boolean (1 or 0) indicating whether to include non-zero intercept
+    // W = j element array representing weights for each data point
+
+    gen X;
+    if((int(v.size()) > 2) && is_one(v[2]))
+      X = evalf_double(_prepend(makevecteur(v[1],pointplus(v[1]._VECTptr->front()*zero,plus_one,contextptr)),contextptr),1,contextptr);  // Add non-zero intercept (row of 1s to X matrix)
+    else
+      X = evalf_double(v[1],1,contextptr);
+
+    gen Y = evalf_double(v[0],1,contextptr);
+    //gen W = evalf_double(v[3],1,contextptr);
+
+    int NDF =int(Y._VECTptr->size()) - int(X._VECTptr->size()); // Degrees of freedom
+
+    // If not enough data, don't attempt regression
+    if (NDF < 0)
+      return gensizeerr(gettext("Not enough data.  Must have more data than independent variables to perform regression."));
+#ifdef BAC_OPTIONS
+    remove_angle_mode(true);
+#endif
+    // Solve B=V*C for C
+    gen B = X * _tran(Y, contextptr);
+    gen V;
+    if(int(v.size()) < 4)
+      V = X * _tran(X, contextptr); // No weights
+    else
+      V = X * _diag(evalf_double(v[3],1,contextptr), contextptr) * _tran(X, contextptr);  // With weights
+    // V now contains the raw least squares matrix
+
+#ifdef BAC_OPTIONS
+    V = inv(V,contextptr) * B;
+    remove_angle_mode(false);
+    // V is now the result.  It is a column vector with each row representing the regression term for data set 'r', where r is the row number.
+    // If we include non-zero constant term, that is the first row.
+    if(V.type != _VECT) return V;
+    if(is_undef(V)) return V;
+
+    // Build the results function
+    gen res;
+    vecteur & resv = *V._VECTptr;
+    int index = 0;
+    if((int(v.size()) > 2) && is_one(v[2])) { // Include non-zero constant term
+      res = resv[0]._VECTptr->front();
+      index = 1;
+    } else
+      res = zero;
+
+    int count = 1;
+    it=x_units.begin();
+    itend=x_units.end();
+    vecteur param;
+    param.reserve(itend - it);
+    for (;it!=itend;++it) {
+      char outstr[16];
+      sprintf(outstr, "x_%d", count);
+      param.push_back(gen(outstr,contextptr));
+      if(is_one(*it)) 
+        res = res + resv[index]._VECTptr->front() * gen(outstr, contextptr);
+      else {
+        char outstr2[16];
+        sprintf(outstr2, "mksa(x_%d)", count);
+        res = res + resv[index]._VECTptr->front() * gen(outstr2, contextptr) / *it;
+      }
+      index++;
+      count++;
+    }
+    return symb_program(gen(param,_SEQ__VECT),param * zero,res * y_units,contextptr); // Multiply by Y units
+#else
+    return inv(V,contextptr) * B;
+#endif
+
+    // C is my coefficients vector
+/*
+    // Calculate statistics
+    double TSS = 0;
+    double RSS = 0;
+    double YBAR = 0;
+    double WSUM = 0;
+    for (int k = 0; k < M; k++)
+    {
+      YBAR = YBAR + W[k] * Y[k];
+      WSUM = WSUM + W[k];
+    }
+    YBAR = YBAR / WSUM;
+    for (int k = 0; k < M; k++)
+    {
+      Ycalc[k] = 0;
+      for (int i = 0; i < N; i++)
+        Ycalc[k] = Ycalc[k] + C[i] * X[i, k];
+      DY[k] = Ycalc[k] - Y[k];
+      TSS = TSS + W[k] * (Y[k] - YBAR) * (Y[k] - YBAR);
+      RSS = RSS + W[k] * DY[k] * DY[k];
+    }
+    double SSQ = RSS / NDF;
+    RYSQ = 1 - RSS / TSS;
+    FReg = 9999999;
+    if (RYSQ < 0.9999999)
+      FReg = RYSQ / (1 - RYSQ) * NDF / (N - 1);
+    SDV = Math.Sqrt(SSQ);
+
+    // Calculate var-covar matrix and std error of coefficients
+    for (int i = 0; i < N; i++)
+    {
+      for (int j = 0; j < N; j++)
+        V[i, j] = V[i, j] * SSQ;
+      SEC[i] = Math.Sqrt(V[i, i]);
+    }
+    return true;
+    */
+  }
+
+  static const char _multi_regression_s []="multi_regression";
+static define_unary_function_eval (__multi_regression,&_multi_regression,_multi_regression_s);
+  define_unary_function_ptr5( at_multi_regression ,alias_at_multi_regression,&__multi_regression,0,true);
+
+
+
   gen _power_regression(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
+#ifdef BAC_OPTIONS
+    remove_angle_mode(true);
+#endif
     gen res= function_regression(evalf(g,1,contextptr),at_ln,at_ln,contextptr);
+#ifdef BAC_OPTIONS
+    remove_angle_mode(false);
+#endif
     if (res.type==_VECT && res._VECTptr->size()==2){
       vecteur v(*res._VECTptr);
       v[1]=exp(v[1],contextptr);
+#ifdef BAC_OPTIONS
+      gen res;
+      if(is_one(mksa_base_first(g._VECTptr->front(),contextptr)))
+        res= v[1] * mksa_base_first(g._VECTptr->back(),contextptr) * pow(gen("x",contextptr),v[0],contextptr);
+      else
+        res= v[1] * mksa_base_first(g._VECTptr->back(),contextptr) * pow(gen("mksa(x)",contextptr) / mksa_base_first(g._VECTptr->front(),contextptr),v[0],contextptr);
+      return symb_program(gen("x",contextptr),zero,res,contextptr);
+#else
       return gen(v,_SEQ__VECT);
+#endif
     }
     return res;
   }
@@ -3557,6 +3790,9 @@ static define_unary_function_eval (__power_regression_plot,&_power_regression_pl
   static gen polynomial_regression(const gen & g,int d,const gen & u1, const gen & u2,double & xmin, double & xmax,GIAC_CONTEXT){
     xmin=1e300,xmax=-xmin;
     vecteur v(genpoint2vecteur(g,contextptr));
+#ifdef BAC_OPTIONS
+    v = mksa_value(v,contextptr);
+#endif
     if (!ckmatrix(v) || v.empty() || v.front()._VECTptr->size()<2)
       return undef;
     // use first and second column
@@ -3617,7 +3853,42 @@ static define_unary_function_eval (__power_regression_plot,&_power_regression_pl
   gen _polynomial_regression(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
     double xmin,xmax;
+#ifdef BAC_OPTIONS
+      remove_angle_mode(true);
+      gen res = polynomial_regression(g,xmin,xmax,contextptr);
+      remove_angle_mode(false);
+      if(is_undef(res)) return res;
+      if(res.type != _VECT) return res;
+      vecteur v(*res._VECTptr);
+      vecteur vg(*g._VECTptr);
+      const_iterateur it=res._VECTptr->begin(),itend=res._VECTptr->end();
+      gen out = zero;
+      int power = int(res._VECTptr->size())-1;
+      if(is_one(mksa_base_first(vg[0],contextptr))) {
+        for (;it!=itend;++it){
+          if(power > 1)
+            out = out + *it * pow(gen("x",contextptr),power,contextptr);
+          else if(power == 1)
+            out = out + *it * gen("x",contextptr);
+          else
+            out = out + *it;
+          power--;
+        }
+      } else {
+        for (;it!=itend;++it){
+          if(power > 1)
+            out = out + *it * pow(gen("mksa(x)",contextptr) / mksa_base_first(vg[0],contextptr),power,contextptr);
+          else if(power == 1)
+            out = out + *it * gen("mksa(x)",contextptr) / mksa_base_first(vg[0],contextptr);
+          else
+            out = out + *it;
+          power--;
+        }
+      }
+      return symb_program(gen("x",contextptr),zero,out * mksa_base_first(vg[1],contextptr),contextptr);
+#else
     return polynomial_regression(g,xmin,xmax,contextptr);
+#endif
   }
   static const char _polynomial_regression_s []="polynomial_regression";
 static define_unary_function_eval (__polynomial_regression,&_polynomial_regression,_polynomial_regression_s);
@@ -3648,6 +3919,9 @@ static define_unary_function_eval (__polynomial_regression_plot,&_polynomial_reg
     if (g.type!=_VECT)
       return gensizeerr(contextptr);
     vecteur & v = *g._VECTptr;
+#ifdef BAC_OPTIONS
+    v=mksa_value(v,contextptr);
+#endif
     int s=int(v.size());
     if (s<2 || s>3)
       return gendimerr(contextptr);
@@ -3661,7 +3935,7 @@ static define_unary_function_eval (__polynomial_regression_plot,&_polynomial_reg
       if (n<20)
 	return gendimerr(gettext("Guessing initial production requires more than 20 samples"));
       gen args=gen(makevecteur(makevecteur(0,1,2,3,4),ln(vecteur(w.begin(),w.begin()+5),contextptr)),_SEQ__VECT);
-      gen res=_linear_regression(args,contextptr);
+      gen res=_linear_regression_direct(args,contextptr);
       if (res.type!=_VECT || res._VECTptr->size()!=2)
 	return gentypeerr(contextptr);
       gen tmp=_correlation(evalf_double(args,1,contextptr),contextptr);
@@ -3700,7 +3974,7 @@ static define_unary_function_eval (__polynomial_regression_plot,&_polynomial_reg
     }
     // linear regression of quot vs cum
     gen args=gen(makevecteur(cum,quot),_SEQ__VECT);
-    gen res=_linear_regression(args,contextptr);
+    gen res=_linear_regression_direct(args,contextptr);
     r=_correlation(args,contextptr);
     if (r.type==_STRNG && r.subtype==-1) return  r;
     if (res.type!=_VECT || res._VECTptr->size()!=2)
@@ -3716,18 +3990,37 @@ static define_unary_function_eval (__polynomial_regression_plot,&_polynomial_reg
       t[i]=tinit+i*tscale;
     }
     args=gen(makevecteur(t,lnurr),_SEQ__VECT);
-    res=_linear_regression(args,contextptr);
+    res=_linear_regression_direct(args,contextptr);
     if (res.type!=_VECT || res._VECTptr->size()!=2)
       return gendimerr(contextptr);
     gen b2=res._VECTptr->front(),bt0=res._VECTptr->back();
+#ifdef BAC_OPTIONS
+    return makevecteur(urr, b2, bt0);
+#else
     return makevecteur(urr/(1+exp(b2*vx_var+bt0,contextptr)),urr*b/2/(1+cosh(b2*vx_var+bt0,contextptr)),urr,urr*b/4,-bt0/b2,r);
+#endif
   }
 
   gen _logistic_regression(const gen & g,GIAC_CONTEXT){
     if ( g.type==_STRNG && g.subtype==-1) return  g;
     double xmin,xmax;
     gen r;
+#ifdef BAC_OPTIONS
+    vecteur & v = *g._VECTptr;
+    gen y_unit = mksa_reduce_base(v[2],contextptr);
+    gen x_unit = mksa_reduce_base(v[1],contextptr);
+    remove_angle_mode(true);
+    gen res = logistic_regression(g,xmin,xmax,r,contextptr);
+    remove_angle_mode(false);
+    if(is_undef(res)) return res;
+    vecteur & resv = *res._VECTptr;
+    if(is_one(x_unit))
+      return symb_program(gen("x",contextptr),zero,y_unit * resv[0] / (1 + exp(resv[1] * gen("x",contextptr) + resv[2],contextptr)),contextptr);
+    else
+      return symb_program(gen("x",contextptr),zero,y_unit * resv[0] / (1 + exp(resv[1] * gen("mksa(x)",contextptr)/x_unit + resv[2],contextptr)),contextptr);
+#else
     return logistic_regression(g,xmin,xmax,r,contextptr);
+#endif
   }
   static const char _logistic_regression_s []="logistic_regression";
 static define_unary_function_eval (__logistic_regression,&_logistic_regression,_logistic_regression_s);
@@ -4115,11 +4408,15 @@ static define_unary_function_eval (__center2interval,&_center2interval,_center2i
 	if (*it>=max_class)
 	  break;
       }
+#ifdef BAC_OPTIONS
+      res.push_back(makevecteur(min_class,max_class,effectif)); // BAC apps does its own plots, so histogram should just return the frequencies
+#else
       effectif /= s*class_size; // height of the class
       gen ming=min_class+gen(0.0,effectif);
       gen maxg=max_class+gen(0.0,effectif);
       gen rectan(makevecteur(min_class,max_class,maxg,ming,min_class),_LINE__VECT);
       res.push_back(pnt_attrib(rectan,attributs,contextptr));
+#endif
       // res.push_back(_segment(makevecteur(min_class,ming),contextptr));
       // res.push_back(_segment(makevecteur(ming,maxg),contextptr));
       // res.push_back(_segment(makevecteur(maxg,max_class),contextptr));
@@ -4457,7 +4754,7 @@ static define_unary_function_eval (__histogram,&_histogram,_histogram_s);
 	  return vecteur(1,gendimerr(contextptr));
       }
       else
-	res.push_back(i+(xcas_mode(contextptr)?1:0)+cst_i*tmp);
+	res.push_back(i+(one_indexed() || xcas_mode(contextptr)?1:0)+cst_i*tmp);
     }
     return res;
   }
@@ -5130,9 +5427,111 @@ static define_unary_function_eval (__simplex_reduce,&_simplex_reduce,_simplex_re
     }
     return pol;
   }
+#ifdef BAC_OPTIONS
+  gen _spline_external(const gen & g,GIAC_CONTEXT){
+    gen out = _spline(g, contextptr);
+    if(is_undef(out)) return out;
+    //Should have a nice vector of polynomials now:
+    vecteur w(*g._VECTptr);
+    vecteur o(*out._VECTptr);
+    vecteur x(*(w[0])._VECTptr);
+    //Start creating the program: Basically a huge nested set of if/else statements
+    gen prog;
+    if((w.size() >= 5) && is_one(w[4]))
+      prog = o[0];
+    else
+      prog = undef;
+    for(int i = 0; i < int(x.size()-1); i++) {
+      if(i==int(x.size()-2) && !((w.size() >= 5) && is_one(w[4]))) // If no extrapolation, use >= on last command
+        prog = symb_when(symbolic(at_evalf,symb_and(symb_superieur_egal(gen(w[2]),x[i]),symb_superieur_egal(x[i+1],gen(w[2])))), o[i], prog);
+      else
+        prog = symb_when(symbolic(at_evalf,symb_and(symb_superieur_egal(gen(w[2]),x[i]),symb_superieur_strict(x[i+1],gen(w[2])))), o[i], prog);
+    }
+    if((w.size() >= 5) && is_one(w[4]))
+      prog = symb_when(symbolic(at_evalf,symb_superieur_egal(gen(w[2]),x[int(x.size()-1)])), o[int(x.size()-2)], prog);
+    return symbolic(at_program,gen(makevecteur(w[2],0,gen(symbolic(at_bloc,gen(symbolic(at_return,prog))))),_SEQ__VECT));
+  }
+
   static const char _spline_s []="spline";
-static define_unary_function_eval (__spline,&_spline,_spline_s);
+  static define_unary_function_eval (__spline,&_spline_external,_spline_s);
   define_unary_function_ptr5( at_spline ,alias_at_spline,&__spline,0,true);
+
+  bool test_numeric(const gen & a){
+    switch (a.type){
+    case _DOUBLE_: case _INT_: case _ZINT: case _REAL:
+      return true;
+    case _CPLX:
+      return test_numeric(*a._CPLXptr) && test_numeric(*(a._CPLXptr+1));
+    case _VECT:
+      return test_numeric(*a._VECTptr);
+    case _FRAC:
+      return test_numeric(a._FRACptr->num) && test_numeric(a._FRACptr->den);
+    case _SYMB:
+      if (a.is_symb_of_sommet(at_prod) || a.is_symb_of_sommet(at_inv) || a.is_symb_of_sommet(at_neg) || a.is_symb_of_sommet(at_plus))
+  return test_numeric(a._SYMBptr->feuille);
+    default:
+      return false;
+    }
+  }
+  // Find nearest value in a vecteur, with mode:
+  // 0: closest above or below
+  // 1: closest but greater
+  // 2: closest but less than
+  gen find_nearest_value(const gen & g, const vecteur & v, const int mode) {
+    gen out = undef;
+    gen diff = zero;
+    const_iterateur jt=v.begin(),jtend=v.end();
+    for (;jt!=jtend;++jt){
+      gen val = *jt;
+      if(val.type == _VECT) {
+        val = find_nearest_value(g, *val._VECTptr, mode);
+        if(is_undef(val)) return val;
+      }
+      if(!test_numeric(mksa_value(val,context0))) continue;
+      if(is_greater(diff,abs(g-val),context0) || is_zero(diff)) {
+        // Match
+        if((mode == 0) || (mode==1 && is_greater(val,g,context0)) || (mode==2 && is_greater(g,val,context0))) {
+          out = val;
+          diff = abs(g-val);
+          if(is_zero(diff)) return out;
+        }
+      }
+    }
+    return out;
+  }
+
+  gen closest(const gen & g, const int mode, GIAC_CONTEXT){
+    if(g.type != _VECT) return g;
+    if(g._VECTptr->size() < 2) return gensizeerr();
+    if(g._VECTptr->front().type != _VECT) return g._VECTptr->front();
+    return find_nearest_value(g._VECTptr->back(), *g._VECTptr->front()._VECTptr, mode);
+  }
+  gen _closest(const gen & g, GIAC_CONTEXT){
+    return closest(g, 0, contextptr);
+  }
+  static const char _closest_s []="closest";
+  static define_unary_function_eval (__closest,&_closest,_closest_s);
+  define_unary_function_ptr5( at_closest ,alias_at_closest,&__closest,0,true);
+
+  gen _closest_greater(const gen & g, GIAC_CONTEXT){
+    return closest(g, 1, contextptr);
+  }
+  static const char _closest_greater_s []="closest_greater";
+  static define_unary_function_eval (__closest_greater,&_closest_greater,_closest_greater_s);
+  define_unary_function_ptr5( at_closest_greater ,alias_at_closest_greater,&__closest_greater,0,true);
+
+  gen _closest_lesser(const gen & g, GIAC_CONTEXT){
+    return closest(g, 2, contextptr);
+  }
+  static const char _closest_lesser_s []="closest_lesser";
+  static define_unary_function_eval (__closest_lesser,&_closest_lesser,_closest_lesser_s);
+  define_unary_function_ptr5( at_closest_lesser ,alias_at_closest_lesser,&__closest_lesser,0,true);
+
+#else
+  static const char _spline_s []="spline";
+  static define_unary_function_eval (__spline,&_spline,_spline_s);
+  define_unary_function_ptr5( at_spline ,alias_at_spline,&__spline,0,true);
+#endif
 
   gen giac_bitand(const gen & a,const gen & b){
     register unsigned t=(a.type<< _DECALAGE) | b.type;
@@ -6633,6 +7032,17 @@ static define_unary_function_eval (__os_version,&_os_version,_os_version_s);
   static define_unary_function_eval (__coth,&_coth,_coth_s);
   define_unary_function_ptr5( at_coth ,alias_at_coth,&__coth,0,true);
 
+#ifdef BAC_OPTIONS
+  gen _atan2(const gen & g, GIAC_CONTEXT) {  
+    if (g.type==_VECT && g.subtype==_SEQ__VECT && g._VECTptr->size()==2){
+      vecteur & v=*g._VECTptr;
+      gen e2 = _usimplify_base(v.front(), contextptr);
+      gen e1 = _usimplify_base(v.back(), contextptr);
+      return arg(makecomplex(e1, e2), contextptr);
+    }
+    return gensizeerr(contextptr);
+  }
+#else
   gen _atan2(const gen & args,GIAC_CONTEXT){
     if (args.type!=_VECT)
       return gensizeerr(contextptr);
@@ -6641,6 +7051,7 @@ static define_unary_function_eval (__os_version,&_os_version,_os_version_s);
       return arg(args._VECTptr->back()+cst_i*args._VECTptr->front(),contextptr);
     return gensizeerr(contextptr); //apply(args,_atan2,contextptr);
   }
+#endif
   static const char _atan2_s []="atan2";
   static define_unary_function_eval (__atan2,&_atan2,_atan2_s);
   define_unary_function_ptr5( at_atan2 ,alias_at_atan2,&__atan2,0,true);

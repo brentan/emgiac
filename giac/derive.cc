@@ -739,7 +739,14 @@ namespace giac {
   static string texprintasderive(const gen & feuille,const char * sommetstr,GIAC_CONTEXT){
     if (feuille.type!=_VECT)
       return gen2tex(feuille,contextptr)+"'";
-    return "\\frac{\\partial \\left("+gen2tex(feuille._VECTptr->front(),contextptr)+"\\right)}{\\partial "+gen2tex(feuille._VECTptr->back(),contextptr)+"}";
+    #ifndef BAC_OPTIONS
+      return "\\frac{\\partial \\left("+gen2tex(feuille._VECTptr->front(),contextptr)+"\\right)}{\\partial "+gen2tex(feuille._VECTptr->back(),contextptr)+"}";
+    #else
+      if ((feuille._VECTptr->size()==2) || (gen2tex(feuille._VECTptr->back(),contextptr).compare("1") == 0))
+        return "\\pderivative_{" + gen2tex(feuille._VECTptr->back(),contextptr) + "}\\left({" + gen2tex(feuille._VECTptr->front(),contextptr) + "}\\right)";
+      else 
+        return "\\pderivatived_{" + gen2tex(feuille._VECTptr->back(),contextptr) + "}_{" + gen2tex((*feuille._VECTptr)[1],contextptr) + "}\\left({" + gen2tex(feuille._VECTptr->front(),contextptr) + "}\\right)";
+    #endif
   }
   static define_unary_function_eval4_quoted (__derive,&step_derive,_derive_s,printasderive,texprintasderive);
   define_unary_function_ptr5( at_derive ,alias_at_derive,&__derive,_QUOTE_ARGUMENTS,true);
@@ -771,7 +778,7 @@ namespace giac {
       return gensizeerr(contextptr);
     return _derive(args,contextptr);
   }
-  static const char _grad_s []="grad";
+  static const char _grad_s []="gradient";
   static define_unary_function_eval_quoted (__grad,&_grad,_grad_s);
   define_unary_function_ptr5( at_grad ,alias_at_grad,&__grad,_QUOTE_ARGUMENTS,true);
 

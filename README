@@ -1,21 +1,4 @@
 
-gmp.js is a port of the GNU Multiple-Precision Library (GMP), a library for arbitrary precision arithmetic, to JavaScript using Emscripten.
+An emscripten port of giac for use with my own apps.  Most of this software is created by the giac creators, especially Bernard Parisse.  Some modifications have been added for my apps specific usage needs.  These modifications can be enabled/disabled using the BAC_OPTIONS compiler flag.
 
-GMP website: http://gmplib.org/
-Steps to build
-
-    First run configure and make natively/normally. You will need some of the generated executables. Optionally, also build test.c and see that it works (see instructions inside test.c).
-
-    Run configure using something like
-    export CFLAGS=-m32
-    ./configure ABI=32
-    make clean
-    (export CFLAGS='-Os -s PRECISE_I32_MUL=1' does not work)
-    EMCONFIGURE_JS=1 emconfigure ./configure --build=none --host=none
-
-    Edit config.h and disable HAVE_QUAD_T, HAVE_OBSTACK_VPRINTF
-
-    Run make using something like
-
-    emmake make
-
+Note that asm.js backup copy is compiled with emscripten 1.34.1, while WASM version is compiled with 1.38 (latest)

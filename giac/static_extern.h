@@ -981,6 +981,18 @@ extern const unary_function_ptr * const  at_minimax;
 extern const unary_function_ptr * const  at_minimize;
 extern const unary_function_ptr * const  at_mkisom;
 extern const unary_function_ptr * const  at_mksa;
+#ifdef BAC_OPTIONS
+  extern const unary_function_ptr * const  at_forceTemperature;
+  extern const unary_function_ptr * const  at_mksa_base;
+  extern const unary_function_ptr * const  at_mksa_base_first;
+  extern const unary_function_ptr * const  at_mksa_remove;
+  extern const unary_function_ptr * const  at_mksa_coefficient;
+  extern const unary_function_ptr * const  at_mksa_offset;
+  extern const unary_function_ptr * const  at_default_units_coefficient;
+  extern const unary_function_ptr * const  at_default_units_offset;
+  extern const unary_function_ptr * const  at_default_units;
+  extern const unary_function_ptr * const  at_default_base;
+#endif
 extern const unary_function_ptr * const  at_modgcd;
 extern const unary_function_ptr * const  at_modgcd_cachesize;
 extern const unary_function_ptr * const  at_modp;
@@ -993,6 +1005,7 @@ extern const unary_function_ptr * const  at_mpzclass_allowed;
 extern const unary_function_ptr * const  at_mul;
 extern const unary_function_ptr * const  at_mult_c_conjugate;
 extern const unary_function_ptr * const  at_mult_conjugate;
+extern const unary_function_ptr * const  at_multi_regression;
 extern const unary_function_ptr * const  at_multcrement;
 extern const unary_function_ptr * const  at_multinomial;
 extern const unary_function_ptr * const  at_multiplier_conjugue;
@@ -1487,9 +1500,15 @@ extern const unary_function_ptr * const  at_uniformd;
 extern const unary_function_ptr * const  at_uniformd_cdf;
 extern const unary_function_ptr * const  at_uniformd_icdf;
 extern const unary_function_ptr * const  at_unitV;
+#ifdef BAC_OPTIONS
+  extern const unary_function_ptr * const  at_unit_remove;
+#endif
 extern const unary_function_ptr * const  at_unquote;
 extern const unary_function_ptr * const  at_upper;
 extern const unary_function_ptr * const  at_usimplify;
+#ifdef BAC_OPTIONS
+extern const unary_function_ptr * const  at_usimplify_base;
+#endif
 extern const unary_function_ptr * const  at_valuation;
 extern const unary_function_ptr * const  at_vandermonde;
 extern const unary_function_ptr * const  at_variance;

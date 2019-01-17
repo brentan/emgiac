@@ -545,6 +545,10 @@ throw(std::runtime_error("Stopped by user interruption.")); \
     bool _rpn_mode_;
     bool _try_parse_i_;
     bool _specialtexprint_double_;
+    #ifdef BAC_OPTIONS
+      bool _one_indexed_;
+      bool _remove_angle_mode_;
+    #endif
     bool _atan_tan_no_floor_;
     bool _keep_acosh_asinh_;
     bool _keep_algext_;
@@ -779,6 +783,14 @@ throw(std::runtime_error("Stopped by user interruption.")); \
   bool angle_radian(GIAC_CONTEXT);
   void angle_radian(bool b,GIAC_CONTEXT);
   bool angle_degree(GIAC_CONTEXT);
+
+  bool one_indexed();
+  void one_indexed(bool b);
+  #ifdef BAC_OPTIONS
+
+    bool remove_angle_mode();
+    void remove_angle_mode(bool b);
+  #endif
 
   bool & show_point(GIAC_CONTEXT);
   void show_point(bool b,GIAC_CONTEXT);

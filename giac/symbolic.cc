@@ -319,7 +319,7 @@ namespace giac {
 	else {
 	  if (i)
 	    s += '*';
-	  if ( e._SYMBptr->sommet==at_plus || e._SYMBptr->sommet==at_neg || is_inequation(e) ){
+	  if ( e._SYMBptr->sommet==at_plus || e._SYMBptr->sommet==at_neg || is_inequation(e) || need_parenthesis(e._SYMBptr->sommet) ){
 	    s += "(";
 	    add_print(s,e,contextptr);
 	    s += ")";

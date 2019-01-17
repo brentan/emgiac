@@ -22,7 +22,6 @@ using namespace std;
 #include <cmath>
 #include <cstdlib>
 #include "gen.h"
-#include "identificateur.h"
 #include "symbolic.h"
 #include "poly.h"
 #include "usual.h"
@@ -32,6 +31,7 @@ using namespace std;
 #include "moyal.h"
 #include "subst.h"
 #include "gausspol.h"
+#include "emscripten.h"
 #include "identificateur.h"
 #include "ifactor.h"
 #include "prog.h"
@@ -332,13 +332,30 @@ namespace giac {
   }
   gen _inv(const gen & args,GIAC_CONTEXT){
     if ( args.type==_STRNG && args.subtype==-1) return  args;
+#ifdef BAC_OPTIONS // inv([.5 .2]) should give [2 5], not 10
+    if ((args.type!=_VECT) || ckmatrix(args) || (args.subtype==_VECTOR__VECT) || (args.subtype < _SEQ__VECT))
+#else
     if ((args.type!=_VECT) || ckmatrix(args))
+#endif
       return inv(args,contextptr);
     if (args.subtype==_SEQ__VECT){
       iterateur it=args._VECTptr->begin(), itend=args._VECTptr->end();
       gen prod(1);
-      for (;it!=itend;++it)
-	prod = prod * (*it);
+      for (;it!=itend;++it) {
+#ifndef BAC_OPTIONS
+      if(it->type == _IDNT) {
+        if(*it == _degF_unit) { //degF unit
+          *logptr(contextptr) << gettext("Temperature Units Warning: Multiplication or division of degF with other units is non-physical.  Substituting deltaF.") << endl;
+          *it = _deltaF_unit;
+        } else if(*it == _degC_unit) { //degC unit
+          *logptr(contextptr) << gettext("Temperature Units Warning: Multiplication or division of degC with other units is non-physical.  Substituting deltaC.") << endl;
+          *it = _deltaC_unit;
+        } else if(*it == _K_unit) *it = _deltaK_unit; // K/deltaK/deltaC
+        else if(*it == _Rankine_unit) *it = _deltaRankine_unit; //Rankine/deltaRankine/deltaF
+      }
+#endif
+      prod = prod * (*it);
+    }
       return inv(prod,contextptr);
     }
     return apply(args,_inv,contextptr);
@@ -351,7 +368,12 @@ namespace giac {
     return symbolic(at_ln,e);
   }
 
-  gen ln(const gen & e,GIAC_CONTEXT){
+  gen ln(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e = _usimplify_base(e_in, contextptr);
+    #else
+      gen e = e_in;
+    #endif
     // if (abs_calc_mode(contextptr)==38 && do_lnabs(contextptr) && !complex_mode(contextptr) && (e.type<=_POLY || e.type==_FLOAT_) && !is_positive(e,contextptr)) return gensizeerr(contextptr);
     if (!escape_real(contextptr) && !complex_mode(contextptr) && (e.type<=_POLY || e.type==_FLOAT_) && !is_positive(e,contextptr)) return gensizeerr(contextptr);
     if (e.type==_FLOAT_){
@@ -482,7 +504,12 @@ namespace giac {
 #endif
   define_unary_function_ptr5( at_ln ,alias_at_ln,&__ln,0,true);
 
-  gen log10(const gen & e,GIAC_CONTEXT){
+  gen log10(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e = _usimplify_base(e_in, contextptr);
+    #else
+      gen e = e_in;
+    #endif
     if (e.type==_FLOAT_) {
       if (is_positive(e,contextptr)){
 #ifdef BCD
@@ -547,7 +574,12 @@ namespace giac {
 #endif
   define_unary_function_ptr5( at_log10 ,alias_at_log10,&__log10,0,true);
 
-  gen alog10(const gen & e,GIAC_CONTEXT){
+  gen alog10(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e = _usimplify_base(e_in, contextptr);
+    #else
+      gen e = e_in;
+    #endif
 #ifdef BCD
     if (e.type==_FLOAT_)
       return falog10(e._FLOAT_val);
@@ -573,7 +605,22 @@ namespace giac {
   static gen atanasln(const gen & e,GIAC_CONTEXT){
     return plus_one_half*cst_i*ln(rdiv(cst_i+e,cst_i-e,contextptr),contextptr);
   }
-  gen atan(const gen & e0,GIAC_CONTEXT){
+  gen add_trig_unit(const gen & e, const gen & u, GIAC_CONTEXT) {
+#ifdef BAC_OPTIONS
+    if(remove_angle_mode())
+      return mksa_value(symbolic(at_unit, makevecteur(e, u)), contextptr);
+    else
+      return symbolic(at_unit, makevecteur(e, u));
+#else
+    return e;
+#endif
+  }
+  gen atan(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_)
 #ifdef BCD
       return fatan(e0._FLOAT_val,angle_mode(contextptr));
@@ -588,11 +635,11 @@ namespace giac {
       double res=std::atan(e._DOUBLE_val);
 #endif
       if (angle_radian(contextptr)) 
-	return res;
+	return add_trig_unit(res,_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	      return res*rad2deg_d;
+	      return add_trig_unit(res*rad2deg_d,_deg_unit, contextptr);
       else
-        return res*rad2grad_d;
+        return add_trig_unit(res*rad2grad_d,_grad_unit, contextptr);
     }
     if (e.type==_SPOL1){
       gen expo=e._SPOL1ptr->empty()?undef:e._SPOL1ptr->front().exponent;
@@ -601,21 +648,21 @@ namespace giac {
     }
     if (e.type==_REAL){
       if (angle_radian(contextptr)) 
-	return e._REALptr->atan();
+	return add_trig_unit(e._REALptr->atan(),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	      return 180*e._REALptr->atan()/cst_pi;
+	      return add_trig_unit(180*e._REALptr->atan()/cst_pi,_deg_unit, contextptr);
       //grad
       else
-        return 200*e._REALptr->atan()/cst_pi;
+        return add_trig_unit(200*e._REALptr->atan()/cst_pi,_grad_unit, contextptr);
     }
     if ( (e.type==_CPLX) && (e.subtype || e._CPLXptr->type==_REAL || e._CPLXptr->type==_FLOAT_)){
       if (angle_radian(contextptr)) 
-	return no_context_evalf(atanasln(e,contextptr));
+	return add_trig_unit(no_context_evalf(atanasln(e,contextptr)),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	      return no_context_evalf(atanasln(e,contextptr))*gen(rad2deg_d);
+	      return add_trig_unit(no_context_evalf(atanasln(e,contextptr))*gen(rad2deg_d),_deg_unit, contextptr);
       //grad
       else
-        return no_context_evalf(atanasln(e, contextptr))*gen(rad2grad_d);
+        return add_trig_unit(no_context_evalf(atanasln(e, contextptr))*gen(rad2grad_d),_grad_unit, contextptr);
     }
     if (is_squarematrix(e))
       return analytic_apply(at_atan,*e._VECTptr,contextptr);
@@ -625,57 +672,57 @@ namespace giac {
       return e;
     if (is_one(e)){
       if (angle_radian(contextptr)) 
-	return rdiv(cst_pi,4,contextptr);
+	return add_trig_unit(rdiv(cst_pi,4,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 45;
+      return add_trig_unit(45,_deg_unit, contextptr);
       //grad
       else
-        return 50;
+        return add_trig_unit(50,_grad_unit, contextptr);
     }
     if (is_minus_one(e)){
       if (angle_radian(contextptr)) 
-	return rdiv(-cst_pi,4,contextptr);
+	return add_trig_unit(rdiv(-cst_pi,4,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return -45;
+      return add_trig_unit(-45,_deg_unit, contextptr);
       //grad
       else
-        return -50;
+        return add_trig_unit(-50,_grad_unit, contextptr);
     }
     if (e==plus_sqrt3_3){
       if (angle_radian(contextptr)) 
-	return rdiv(cst_pi,6,contextptr);
+	return add_trig_unit(rdiv(cst_pi,6,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 30;
+      return add_trig_unit(30,_deg_unit, contextptr);
       //grad
       else
-        return rdiv(100,3); //100/3 grads
+        return add_trig_unit(rdiv(100,3),_grad_unit, contextptr); //100/3 grads
     }
     if (e==plus_sqrt3){
       if (angle_radian(contextptr)) 
-	return rdiv(cst_pi,3,contextptr);
+	return add_trig_unit(rdiv(cst_pi,3,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 60;
+      return add_trig_unit(60,_deg_unit, contextptr);
       //grad
       else
-        return rdiv(200,3); //200/3 grads
+        return add_trig_unit(rdiv(200,3),_grad_unit, contextptr); //200/3 grads
     }
     if (e==plus_inf){
       if (angle_radian(contextptr)) 
-	return cst_pi_over_2;
+	return add_trig_unit(cst_pi_over_2,_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 90;
+      return add_trig_unit(90,_deg_unit, contextptr);
       //grad
       else
-        return 100;
+        return add_trig_unit(100,_grad_unit, contextptr);
     }
     if (e==minus_inf){
       if (angle_radian(contextptr)) 
-	return -cst_pi_over_2;
+	return add_trig_unit(-cst_pi_over_2,_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return -90;
+      return add_trig_unit(-90,_deg_unit, contextptr);
       //grad
       else
-        return -100;
+        return add_trig_unit(-100,_grad_unit, contextptr);
     }
     if (is_undef(e))
       return e;
@@ -693,9 +740,9 @@ namespace giac {
 	  normal(horner(makevecteur(-5,60,-126,60,-5),e*e),contextptr)==0){
 	int res=int(std::floor(std::atan(std::abs(ed))*10/M_PI+.5));
 	if (res%2)
-	  return (ed>0?res:-res)*(angle_radian(contextptr)?cst_pi/10:(angle_degree(contextptr)?gen(18):gen(20))); //grad
+	  return (ed>0?res:-res)*(angle_radian(contextptr)?add_trig_unit(cst_pi/10,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit(gen(18),_deg_unit, contextptr):add_trig_unit(gen(20),_grad_unit, contextptr))); //grad
 	else
-	  return (ed>0?res/2:-res/2)*(angle_radian(contextptr)?cst_pi/5:(angle_degree(contextptr)?gen(36):gen(40))); //grad
+	  return (ed>0?res/2:-res/2)*(angle_radian(contextptr)?add_trig_unit(cst_pi/5,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit(gen(36),_deg_unit, contextptr):add_trig_unit(gen(40),_grad_unit, contextptr))); //grad
       }
       edh=horner(makevecteur(-3,55,-198,198,-55,3),tmp*tmp);
       if (std::abs(edh._DOUBLE_val)<1e-7){      
@@ -703,13 +750,13 @@ namespace giac {
 	int den=12;
 	int g=gcd(res,den);
 	res /=g; den /=g;
-	return (ed>0?res:-res)*(angle_radian(contextptr)?cst_pi/den:(angle_degree(contextptr)?gen(15*g):rdiv(50,3)*gen(g))); //grad   50/3*g grads
+	return (ed>0?res:-res)*(angle_radian(contextptr)?add_trig_unit(cst_pi/den,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit(gen(15*g),_deg_unit, contextptr):add_trig_unit(rdiv(50,3)*gen(g),_grad_unit, contextptr))); //grad   50/3*g grads
       }
       edh=horner(makevecteur(1,-6,1),ed*ed);
       if (std::abs(edh._DOUBLE_val)<1e-7 &&
 	  normal(horner(makevecteur(1,-6,1),e*e),contextptr)==0){
 	int res=int(std::floor(std::atan(std::abs(ed))*8/M_PI+.5));
-	return (ed>0?res:-res)*(angle_radian(contextptr)?cst_pi/8:(angle_degree(contextptr)?gen(45)/2:gen(25))); //grad 
+	return (ed>0?res:-res)*(angle_radian(contextptr)?add_trig_unit(cst_pi/8,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit(gen(45)/2,_deg_unit, contextptr):add_trig_unit(gen(25),_grad_unit, contextptr))); //grad 
       }
     }
     if ((e.type==_SYMB) && (e._SYMBptr->sommet==at_neg))
@@ -728,14 +775,14 @@ namespace giac {
     if (e.is_symb_of_sommet(at_tan)){
       if (atan_tan_no_floor(contextptr))
 	return e._SYMBptr->feuille;
-      gen tmp=cst_pi;
+      gen tmp=add_trig_unit(cst_pi,_rad_unit, contextptr);
       if(!angle_radian(contextptr))
       {
         if(angle_degree(contextptr))
-	  tmp=180;
+	  tmp=add_trig_unit(180,_deg_unit, contextptr);
         //grad
         else
-          tmp = 200;
+          tmp = add_trig_unit(200,_grad_unit, contextptr);
       }
       gen tmp2=evalf(e._SYMBptr->feuille,1,contextptr);
       if (tmp2.type<_IDNT)
@@ -753,15 +800,15 @@ namespace giac {
       gen test=(1+t)/(1-t);
       test=ratnormal(e/test,contextptr);
       if (is_one(test))
-	return atan(symbolic(at_tan,cst_pi/4+atan(t,contextptr)),contextptr);
+	return atan(symbolic(at_tan,add_trig_unit(cst_pi/4,_rad_unit, contextptr)+atan(t,contextptr)),contextptr);
       if (is_minus_one(test))
-	return -atan(symbolic(at_tan,cst_pi/4+atan(t,contextptr)),contextptr);
+	return -atan(symbolic(at_tan,add_trig_unit(cst_pi/4,_rad_unit, contextptr)+atan(t,contextptr)),contextptr);
       test=(-1+t)/(1+t);
       test=ratnormal(e/test,contextptr);
       if (is_one(test))
-	return atan(symbolic(at_tan,-cst_pi/4+atan(t,contextptr)),contextptr);
+	return atan(symbolic(at_tan,add_trig_unit(-cst_pi/4,_rad_unit, contextptr)+atan(t,contextptr)),contextptr);
       if (is_minus_one(test))
-	return -atan(symbolic(at_tan,-cst_pi/4+atan(t,contextptr)),contextptr);
+	return -atan(symbolic(at_tan,add_trig_unit(-cst_pi/4,_rad_unit, contextptr)+atan(t,contextptr)),contextptr);
     }
     return symb_atan(e);
   }
@@ -810,7 +857,12 @@ namespace giac {
     return res;
   }
 
-  gen exp(const gen & e0,GIAC_CONTEXT){
+  gen exp(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return fexp(e0._FLOAT_val);
@@ -1203,7 +1255,12 @@ namespace giac {
     return oldres;
   }
 
-  gen sqrt(const gen & e,GIAC_CONTEXT){
+  gen sqrt(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e = _usimplify_base(e_in, contextptr);
+    #else
+      gen e = e_in;
+    #endif
     // if (abs_calc_mode(contextptr)==38 && do_lnabs(contextptr) &&!complex_mode(contextptr) && (e.type<=_POLY || e.type==_FLOAT_) && !is_positive(e,contextptr)) return gensizeerr(contextptr);
     if (!escape_real(contextptr) && !complex_mode(contextptr) && (e.type<=_POLY || e.type==_FLOAT_) && !is_positive(e,contextptr)) return gensizeerr(contextptr);
     if (e.type==_FLOAT_){
@@ -1402,7 +1459,12 @@ namespace giac {
   symbolic symb_cos(const gen & e){
     return symbolic(at_cos,e);
   }
-  gen cos(const gen & e0,GIAC_CONTEXT){
+  gen cos(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_angle(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return fcos(e0._FLOAT_val,angle_mode(contextptr));
@@ -1644,7 +1706,12 @@ namespace giac {
   symbolic symb_sin(const gen & e){
     return symbolic(at_sin,e);
   }
-  gen sin(const gen & e0,GIAC_CONTEXT){
+  gen sin(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_angle(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return fsin(e0._FLOAT_val,angle_mode(contextptr));
@@ -1882,7 +1949,12 @@ namespace giac {
   symbolic symb_tan(const gen & e){
     return symbolic(at_tan,e);
   }
-  gen tan(const gen & e0,GIAC_CONTEXT){
+  gen tan(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_angle(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return ftan(e0._FLOAT_val,angle_mode(contextptr));
@@ -2075,7 +2147,12 @@ namespace giac {
     static gen * ans=new gen(normal(cos_pi_12,context0));
     return ans;
   }
-  gen asin(const gen & e0,GIAC_CONTEXT){
+  gen asin(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if ( (calc_mode(contextptr)==38 || !escape_real(contextptr) ) && !complex_mode(contextptr) && (e0.type<=_POLY || e0.type==_FLOAT_) && (!is_positive(e0+1,contextptr) || !is_positive(1-e0,contextptr)))
       return gensizeerr(contextptr);
     if (e0.type==_SPOL1){
@@ -2105,31 +2182,31 @@ namespace giac {
 	double d=std::asin(e._DOUBLE_val);
 #endif
 	if (angle_radian(contextptr)) 
-	  return d;
+	  return add_trig_unit(d,_rad_unit, contextptr);
 	else if(angle_degree(contextptr))
-	  return d*rad2deg_d;
+	  return add_trig_unit(d*rad2deg_d,_deg_unit, contextptr);
 	//grad
 	else
-	  return d*rad2grad_d;
+    return d*rad2grad_d;
       }
     }
     if (e.type==_REAL){
       if (angle_radian(contextptr)) 
-	return e._REALptr->asin();
+	return add_trig_unit(e._REALptr->asin(),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	return 180*e._REALptr->asin()/cst_pi;
+	      return 180*e._REALptr->asin()/cst_pi;
       //grad
       else
-        return 200*e._REALptr->asin()/cst_pi;
+        return add_trig_unit(200*e._REALptr->asin()/cst_pi,_grad_unit, contextptr);
     }
     if ( e.type==_DOUBLE_ || (e.type==_CPLX && (e.subtype || e._CPLXptr->type==_FLOAT_ || e._CPLXptr->type==_REAL)) ){
       if (angle_radian(contextptr)) 
-	return no_context_evalf(asinasln(e,contextptr));
+	return add_trig_unit(no_context_evalf(asinasln(e,contextptr)),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	return no_context_evalf(asinasln(e,contextptr))*gen(rad2deg_d);
+	      return no_context_evalf(asinasln(e,contextptr))*gen(rad2deg_d);
       //grad
       else
-        return no_context_evalf(asinasln(e,contextptr))*gen(rad2grad_d);
+        return add_trig_unit(no_context_evalf(asinasln(e,contextptr))*gen(rad2grad_d),_grad_unit, contextptr);
     }
     if (is_squarematrix(e))
       return analytic_apply(at_asin,*e._VECTptr,contextptr);
@@ -2140,12 +2217,12 @@ namespace giac {
     if (is_one(e)){
       if (is_zero(e)) fonction_bidon();
       if (angle_radian(contextptr))
-	return cst_pi_over_2;
+	return add_trig_unit(cst_pi_over_2,_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 90;
+      return add_trig_unit(90,_deg_unit, contextptr);
       //grad
       else
-        return 100;
+        return add_trig_unit(100,_grad_unit, contextptr);
     }
     if (e==sin_pi_12 
 #ifndef VISUALC
@@ -2153,12 +2230,12 @@ namespace giac {
 #endif
 	){
       if (angle_radian(contextptr))
-	return rdiv(cst_pi,12,contextptr);
+	return add_trig_unit(rdiv(cst_pi,12,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 15;
+      return add_trig_unit(15,_deg_unit, contextptr);
       //grad
       else
-        return rdiv(50, 3); //50/3 grads
+        return add_trig_unit(rdiv(50, 3),_grad_unit, contextptr); //50/3 grads
     }
     if (e==cos_pi_12 
 #ifndef VISUALC
@@ -2166,39 +2243,39 @@ namespace giac {
 #endif
 	){
       if (angle_radian(contextptr))
-	return 5*cst_pi/12;
+	return add_trig_unit(5*cst_pi/12,_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 75;
+      return add_trig_unit(75,_deg_unit, contextptr);
       //grad
       else
-        return rdiv(250,3); //250/3 grads
+        return add_trig_unit(rdiv(250,3),_grad_unit, contextptr); //250/3 grads
     }
     if (e==plus_sqrt3_2){
       if (angle_radian(contextptr))
-	return rdiv(cst_pi,3,contextptr);
+	return add_trig_unit(rdiv(cst_pi,3,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 60;
+      return add_trig_unit(60,_deg_unit, contextptr);
       //grad
       else
-        return rdiv(200,3); //200/3 grads
+        return add_trig_unit(rdiv(200,3),_grad_unit, contextptr); //200/3 grads
     }
     if (e==plus_sqrt2_2){
       if (angle_radian(contextptr)) 
-	return rdiv(cst_pi,4,contextptr);
+	return add_trig_unit(rdiv(cst_pi,4,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 45;
+      return add_trig_unit(45,_deg_unit, contextptr);
       //grad
       else
-        return 50;
+        return add_trig_unit(50,_grad_unit, contextptr);
     }
     if (e==plus_one_half){
       if (angle_radian(contextptr)) 
-	return rdiv(cst_pi,6,contextptr);
+	return add_trig_unit(rdiv(cst_pi,6,contextptr),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-      return 30;
+      return add_trig_unit(30,_deg_unit, contextptr);
       //grad
       else
-        return rdiv(100,3); //100/3 grads
+        return add_trig_unit(rdiv(100,3),_grad_unit, contextptr); //100/3 grads
     }
     gen edg=evalf_double(e,1,contextptr);
     if (edg.type==_DOUBLE_){
@@ -2209,9 +2286,9 @@ namespace giac {
 	  normal(horner(makevecteur(256,-512,336,-80,5),e*e),contextptr)==0){
 	int res=int(std::floor(std::asin(std::abs(ed))*10/M_PI+.5));
 	if (res%2)
-	  return (ed>0?res:-res)*(angle_radian(contextptr)?cst_pi/10:(angle_degree(contextptr)?gen(18):gen(20))); //grad
+	  return angle_radian(contextptr)?add_trig_unit((ed>0?res:-res)*cst_pi/10,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit((ed>0?res:-res)*gen(18),_deg_unit, contextptr):add_trig_unit((ed>0?res:-res)*gen(20),_grad_unit, contextptr)); //grad
 	else
-	  return (ed>0?res/2:-res/2)*(angle_radian(contextptr)?cst_pi/5:(angle_degree(contextptr)?gen(36):gen(40))); //grad
+	  return angle_radian(contextptr)?add_trig_unit((ed>0?res/2:-res/2)*cst_pi/5,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit((ed>0?res/2:-res/2)*gen(36),_deg_unit, contextptr):add_trig_unit((ed>0?res/2:-res/2)*gen(40),_grad_unit, contextptr)); //grad
       }
       edh=horner(makevecteur(512,-1280,1152,-448,70,-3),edg*edg);
       if (std::abs(edh._DOUBLE_val)<1e-9 &&
@@ -2220,7 +2297,7 @@ namespace giac {
 	int den=12;
 	int g=gcd(res,den);
 	res /=g; den /=g;
-	return (ed>0?res:-res)*(angle_radian(contextptr)?cst_pi/den:(angle_degree(contextptr)?gen(15*g):rdiv(50,3)*gen(g))); //grad   50/3*g grads
+	return angle_radian(contextptr)?add_trig_unit((ed>0?res:-res)*cst_pi/den,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit((ed>0?res:-res)*gen(15*g),_deg_unit, contextptr):add_trig_unit((ed>0?res:-res)*rdiv(50,3)*gen(g),_grad_unit, contextptr)); //grad   50/3*g grads
       }
       edh=horner(makevecteur(64,-128,80,-16,1),edg*edg);
       if (std::abs(edh._DOUBLE_val)<1e-9 &&
@@ -2229,7 +2306,7 @@ namespace giac {
 	int den=8;
 	int g=gcd(res,den);
 	res /=g; den /=g;
-	return (ed>0?res:-res)*(angle_radian(contextptr)?cst_pi/den:(angle_degree(contextptr)?gen(45*g)/2:gen(25))); //grad
+	return angle_radian(contextptr)?add_trig_unit((ed>0?res:-res)*cst_pi/den,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit((ed>0?res:-res)*gen(45*g)/2,_deg_unit, contextptr):add_trig_unit((ed>0?res:-res)*gen(25),_grad_unit, contextptr)); //grad
       }
     }
     if (is_undef(e))
@@ -2260,7 +2337,7 @@ namespace giac {
     if (is_equal(e))
       return apply_to_equal(e,asin,contextptr);
     if (lidnt(e).empty() && is_positive(e*e-1,contextptr))
-      return (angle_radian(contextptr)?1:(angle_degree(contextptr)?rad2deg_g:rad2grad_g))*asinasln(e,contextptr);
+      return (angle_radian(contextptr)?add_trig_unit(plus_one,_rad_unit, contextptr):(angle_degree(contextptr)?add_trig_unit(rad2deg_g,_deg_unit, contextptr):add_trig_unit(rad2grad_g,_grad_unit, contextptr)))*asinasln(e,contextptr);
     return symb_asin(e);
   }
   static gen d_asin(const gen & args,GIAC_CONTEXT){
@@ -2308,7 +2385,12 @@ namespace giac {
   static symbolic symb_acos(const gen & e){
     return symbolic(at_acos,e);
   }
-  gen acos(const gen & e0,GIAC_CONTEXT){
+  gen acos(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if ( (calc_mode(contextptr)==38 || !escape_real(contextptr) ) && !complex_mode(contextptr) && (e0.type<=_POLY || e0.type==_FLOAT_) && (!is_positive(e0+1,contextptr) || !is_positive(1-e0,contextptr)))
       return gensizeerr(contextptr);
     if (e0.type==_FLOAT_ && is_positive(e0+1,contextptr) && is_positive(1-e0,contextptr)){
@@ -2327,12 +2409,12 @@ namespace giac {
 	double d=std::acos(e._DOUBLE_val);
 #endif
 	if (angle_radian(contextptr)) 
-	  return d;
-	else if(angle_degree(contextptr))
-	  return d*rad2deg_d;
-	//grad
+	  return add_trig_unit(d,_rad_unit, contextptr);
+  else if(angle_degree(contextptr))
+    return add_trig_unit(d*rad2deg_d,_deg_unit, contextptr);
+  //grad
 	else
-	  return d*rad2grad_d;
+    return add_trig_unit(d*rad2grad_d,_grad_unit, contextptr);
       }
     }
     if (e.type==_SPOL1){
@@ -2342,22 +2424,32 @@ namespace giac {
     }
     if (e.type==_REAL){
       if (angle_radian(contextptr)) 
-	return e._REALptr->acos();
+	return add_trig_unit(e._REALptr->acos(),_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	return 180*e._REALptr->acos()/cst_pi;
+	      return add_trig_unit(180*e._REALptr->acos()/cst_pi,_deg_unit, contextptr);
       //grad
       else
-        return 200*e._REALptr->acos()/cst_pi;
+        return add_trig_unit(200*e._REALptr->acos()/cst_pi,_grad_unit, contextptr);
     }
-    if ( e.type==_DOUBLE_ || (e.type==_CPLX && (e.subtype || e._CPLXptr->type==_FLOAT_ || e._CPLXptr->type==_REAL)) ){
+    if (e.type==_DOUBLE_ || e.type==_FLOAT_ || e.type==_REAL){
+      gen res=cst_i*no_context_evalf(ln(sqrt(e*e-1,contextptr)+e,contextptr));
+      if (angle_radian(contextptr)) 
+	return add_trig_unit(res,_rad_unit, contextptr);
+      else if(angle_degree(contextptr))
+	      return add_trig_unit(res*gen(rad2deg_d),_deg_unit, contextptr);
+      //grad
+      else
+        return add_trig_unit(res*gen(rad2grad_d),_grad_unit, contextptr);
+    }
+    if ( e.type==_CPLX && (e.subtype || e._CPLXptr->type==_FLOAT_ || e._CPLXptr->type==_REAL) ){
       gen res=cst_pi/2-asinasln(e,contextptr); // -cst_i*no_context_evalf(ln(sqrt(e*e-1,contextptr)+e,contextptr));
       if (angle_radian(contextptr)) 
-	return res;
+	return add_trig_unit(res,_rad_unit, contextptr);
       else if(angle_degree(contextptr))
-	return res*gen(rad2deg_d);
+	      return add_trig_unit(res*gen(rad2deg_d),_deg_unit, contextptr);
       //grad
       else
-        return res*gen(rad2grad_d);
+        return add_trig_unit(res*gen(rad2grad_d),_grad_unit, contextptr);
     }
     if (is_squarematrix(e))
       return analytic_apply(at_acos,*e._VECTptr,contextptr);
@@ -2371,13 +2463,14 @@ namespace giac {
     gen g=asin(e,contextptr);
     if ( (g.type==_SYMB) && (g._SYMBptr->sommet==at_asin) )
       return symb_acos(e);
+    vecteur & v2=*g._SYMBptr->feuille._VECTptr;
     if (angle_radian(contextptr)) 
-      return normal(cst_pi_over_2-asin(e,contextptr),contextptr);
+      return add_trig_unit(normal(cst_pi_over_2 - v2[0],contextptr),_rad_unit, contextptr);
     else if(angle_degree(contextptr))
-      return 90-asin(e,contextptr);
+      return add_trig_unit(90 - v2[0],_deg_unit, contextptr);
     //grad
     else
-      return 100-asin(e,contextptr);
+      return add_trig_unit(100 - v2[0],_grad_unit, contextptr);
   }
   static gen d_acos(const gen & args,GIAC_CONTEXT){
     gen g= -inv(recursive_normal(sqrt(1-pow(args,2),contextptr),contextptr),contextptr);
@@ -2424,7 +2517,12 @@ namespace giac {
   symbolic symb_sinh(const gen & e){
     return symbolic(at_sinh,e);
   }
-  gen sinh(const gen & e0,GIAC_CONTEXT){
+  gen sinh(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_angle(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return fsinh(e0._FLOAT_val);
@@ -2494,7 +2592,12 @@ namespace giac {
   symbolic symb_cosh(const gen & e){
     return symbolic(at_cosh,e);
   }
-  gen cosh(const gen & e0,GIAC_CONTEXT){
+  gen cosh(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_angle(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return fcosh(e0._FLOAT_val);
@@ -2563,7 +2666,12 @@ namespace giac {
   define_unary_function_ptr5( at_cosh ,alias_at_cosh,&__cosh,0,true);
 
   // static symbolic symb_tanh(const gen & e){ return symbolic(at_tanh,e);  }
-  gen tanh(const gen & e0,GIAC_CONTEXT){
+  gen tanh(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_angle(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return ftanh(e0._FLOAT_val);
@@ -2641,7 +2749,12 @@ namespace giac {
   static gen asinhasln(const gen & x,GIAC_CONTEXT){
     return ln(x+sqrt(x*x+1,contextptr),contextptr);
   }
-  gen asinh(const gen & e0,GIAC_CONTEXT){
+  gen asinh(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
 #ifdef BCD
       return fasinh(e0._FLOAT_val);
@@ -2698,7 +2811,12 @@ namespace giac {
       return ln(x+sqrt(x*x-1,contextptr),contextptr); // avoid multiple sqrt but it's the opposite for example for x non real
     return ln(x+sqrt(x+1,contextptr)*sqrt(x-1,contextptr),contextptr);
   }
-  gen acosh(const gen & e0,GIAC_CONTEXT){
+  gen acosh(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
       if (is_strictly_greater(1,e0,contextptr))
 	return ln(e0+sqrt(pow(e0,2)-1,contextptr),contextptr);
@@ -2753,7 +2871,12 @@ namespace giac {
   define_unary_function_ptr5( at_acosh ,alias_at_acosh,&__acosh,0,true);
 
   // static symbolic symb_atanh(const gen & e){  return symbolic(at_atanh,e);}
-  gen atanh(const gen & e0,GIAC_CONTEXT){
+  gen atanh(const gen & e_in,GIAC_CONTEXT){
+    #ifdef BAC_OPTIONS
+      gen e0 = _usimplify_base(e_in, contextptr);
+    #else
+      gen e0 = e_in;
+    #endif
     if (e0.type==_FLOAT_){
       if (is_strictly_greater(e0,1,contextptr) || is_strictly_greater(-1,e0,contextptr))
 	return rdiv(ln(rdiv(1+e0,1-e0),contextptr),plus_two,contextptr);
@@ -3290,7 +3413,13 @@ namespace giac {
     return sto(a,b,false,contextptr);
   }
   // in_place==true to store in vector/matrices without making a new copy
+#ifdef BAC_OPTIONS
+  gen sto(const gen & a_in,const gen & b_in,bool in_place,const context * contextptr_){
+    gen a = a_in;
+    gen b = b_in;
+#else
   gen sto(const gen & a,const gen & b,bool in_place,const context * contextptr_){
+#endif
     if (a.type==_STRNG && is_undef(a))
       return a;
     if ( (a.type==_IDNT || a.is_symb_of_sommet(at_at)) && b.is_symb_of_sommet(at_rootof) && contextptr_){
@@ -3511,6 +3640,43 @@ namespace giac {
 	    else
 	      return gensizeerr(b.print(contextptr)+gettext(": recursive definition (in sto) "));
 	  }
+#ifdef BAC_OPTIONS
+          if(strstr(b._IDNTptr->id_name, "BACAPPSMETHOD") != NULL) {
+            // CODE ADDED TO CALL OUTSIDE FUNCTION 'eval_function' AND TEST FOR PRESENCE OF THIS VARIABLE...IF SO, SET VALUE!
+            std::string asm_code;
+            std::string method_call = b._IDNTptr->id_name;
+            asm_code += "eval_method( ";
+            size_t pos = 0;
+            while((pos = method_call.find("'", pos)) != std::string::npos) {
+              method_call.replace(pos, 1, "\\'");
+              pos += 2;
+            }
+            pos = method_call.find("BACAPPSMETHOD", 0);
+            method_call.replace(pos, 16, "BACAPPSMETHODset_");
+            asm_code += "'";
+            asm_code += method_call;
+            asm_code += "', '";
+            std::string all_inputs;
+            if ( (a.type==_SYMB) && (a._SYMBptr->sommet==at_quote)) 
+              all_inputs += a._SYMBptr->feuille.evalf(1,contextptr).print(contextptr);
+            else 
+              all_inputs += a.evalf(1,contextptr).print(contextptr);
+            pos = 0; 
+            while ((pos = all_inputs.find('\'', pos)) != std::string::npos) {
+              all_inputs.replace(pos, 1, "\\'");
+              pos += 2;
+            }
+            asm_code += all_inputs;
+            asm_code += "');";
+            std::string out = emscripten_run_script_string( asm_code.data() );
+            if(out.length() > 0) {
+              if(out.compare(0,5,"ERROR") == 0)
+                return gensizeerr(out.substr(7,string::npos));
+              else
+                return gen(out, contextptr);
+            }
+          }
+#endif
 	  sym_tab * symtabptr=contextptr->globalcontextptr?contextptr->globalcontextptr->tabptr:contextptr->tabptr;
 	  sym_tab::iterator it=symtabptr->find(name),itend=symtabptr->end();
 	  if (it!=itend){ 
@@ -3839,6 +4005,11 @@ namespace giac {
 	  vptr->push_back(zero);
 	}
 	// change indice's value
+#ifdef BAC_OPTIONS
+        if(a.type!=_VECT && ckmatrix(*vptr) && (int(vptr->front()._VECTptr->size()) == 1)) 
+          (*vptr)[indice.val]=makevecteur(a);
+        else
+#endif
 	(*vptr)[indice.val]=a;
 	if (in_place)
 	  return valeur; // string2gen("Done",false);
@@ -3852,14 +4023,14 @@ namespace giac {
 	bool itdeuxpoints=it->is_symb_of_sommet(*at_deuxpoints);
 	if ( (it->is_symb_of_sommet(*at_interval) || itdeuxpoints ) && it->_SYMBptr->feuille.type==_VECT && it->_SYMBptr->feuille._VECTptr->size()==2){
 	  gen deb=it->_SYMBptr->feuille._VECTptr->front();
-	  gen fin=it->_SYMBptr->feuille._VECTptr->back()+(itdeuxpoints?minus_one:zero);
-	  if (!is_integral(deb) || !is_integral(fin) || deb.type!=_INT_ || fin.type!=_INT_ )
+	  gen fin=it->_SYMBptr->feuille._VECTptr->back();
+	  if (!is_integral(deb) || !is_integral(fin) || deb.type!=_INT_ || fin.type!=_INT_ || deb.val<0 || fin.val<0 || deb.val>fin.val)
 	    return gendimerr(contextptr);
-	  if (deb.val<0) deb.val+=int(vptr->size());
-	  if (fin.val<0) fin.val+=int(vptr->size());
-	  if (deb.val<0 || fin.val<0 || deb.val>fin.val)
-	    return gendimerr(contextptr);
-	  if (a.type==_VECT && a._VECTptr->size()!=fin.val-deb.val+1)
+#ifdef BAC_OPTIONS
+          if (a.type==_VECT && !ckmatrix(a))
+            a = gen(vecteur2matrice(*a._VECTptr));
+#endif
+          if (a.type==_VECT && a._VECTptr->size()!=fin.val-deb.val+1)
 	    return gendimerr(contextptr);
 	  if (!ckmatrix(*vptr))
 	    return gendimerr(contextptr);
@@ -3876,16 +4047,12 @@ namespace giac {
 	  bool i2deuxpoints=i2.is_symb_of_sommet(*at_deuxpoints);
 	  if ( (i2.is_symb_of_sommet(*at_interval) || i2deuxpoints) && i2._SYMBptr->feuille.type==_VECT && i2._SYMBptr->feuille._VECTptr->size()==2){
 	    gen deb2=i2._SYMBptr->feuille._VECTptr->front();
-	    gen fin2=i2._SYMBptr->feuille._VECTptr->back()+(i2deuxpoints?minus_one:zero);
-	    if (!is_integral(deb2) || !is_integral(fin2) || deb2.type!=_INT_ || fin2.type!=_INT_) 
-	      return gendimerr(contextptr);
-	    if (deb2.val<0) deb2.val+=cols;
-	    if (fin2.val<0) fin2.val+=cols;
-	    if (deb2.val<0 || fin2.val<0 || fin2.val>=cols )
+	    gen fin2=i2._SYMBptr->feuille._VECTptr->back();
+	    if (!is_integral(deb2) || !is_integral(fin2) || deb2.type!=_INT_ || fin2.type!=_INT_ || deb2.val<0 || fin2.val<0 || fin2.val>=cols )
 	      return gendimerr(contextptr);
 	    if (ckmatrix(a)){
 	      if (fin2.val-deb2.val+1!=a._VECTptr->front()._VECTptr->size())
-		return gendimerr(contextptr);	      
+		return gendimerr(contextptr);	  
 	      for (int i=deb.val;i<=fin.val;++i){
 		vecteur & target=*(*vptr)[i]._VECTptr;
 		const vecteur & source=*(*a._VECTptr)[i-deb.val]._VECTptr;
@@ -3900,7 +4067,7 @@ namespace giac {
 	      return sto(gen(v,valeur.subtype),destination,in_place,contextptr);
 	    }
 	    if (fin2.val-deb2.val!=fin.val-deb.val)
-	      return gendimerr(contextptr);	      
+	      return gendimerr(contextptr);	
 	    int shift=deb2.val-deb.val;
 	    if (a.type==_VECT){
 	      for (int i=deb.val;i<=fin.val;++i)
@@ -3916,8 +4083,19 @@ namespace giac {
 	    if (i2.type!=_INT_ || i2.val<0 || i2.val>=cols)
 	      return gendimerr(contextptr);
 	    if (a.type==_VECT){
+#ifdef BAC_OPTIONS
+              if(ckmatrix(a)) {
+                if (fin.val-deb.val+1!=a._VECTptr->size()) return gendimerr(contextptr);    
+                if(a._VECTptr->front()._VECTptr->size() != 1) return gendimerr(contextptr);     
+                for (int i=deb.val;i<=fin.val;++i)
+                  (*(*vptr)[i]._VECTptr)[i2.val]=(*a._VECTptr)[i-deb.val][0];
+              } else {
+#endif
 	      for (int i=deb.val;i<=fin.val;++i)
 		(*(*vptr)[i]._VECTptr)[i2.val]=(*a._VECTptr)[i-deb.val];
+#ifdef BAC_OPTIONS
+              }
+#endif
 	    }
 	    else {
 	      for (int i=deb.val;i<=fin.val;++i)
@@ -3939,13 +4117,15 @@ namespace giac {
 	  if (!in_place)
 	    (*vptr)[i1]=*(*vptr)[i1]._VECTptr;
 	  gen deb2=i2._SYMBptr->feuille._VECTptr->front();
-	  gen fin2=i2._SYMBptr->feuille._VECTptr->back()+(i2deuxpoints?minus_one:zero);
-	  if (!is_integral(deb2) || !is_integral(fin2) || deb2.type!=_INT_ || fin2.type!=_INT_ )
+	  gen fin2=i2._SYMBptr->feuille._VECTptr->back();
+	  if (!is_integral(deb2) || !is_integral(fin2) || deb2.type!=_INT_ || fin2.type!=_INT_ || deb2.val<0 || fin2.val <deb2.val || fin2.val>=vptr->front()._VECTptr->size())
 	    return gendimerr(contextptr);
-	  if (deb2.val<0) deb2.val += int(vptr->front()._VECTptr->size());
-	  if (fin2.val<0) fin2.val += int(vptr->front()._VECTptr->size());
-	  if (deb2.val<0 || fin2.val <deb2.val || fin2.val>=int(vptr->front()._VECTptr->size()))
-	    return gendimerr(contextptr);
+#ifdef BAC_OPTIONS
+          if (a.type == _VECT && ckmatrix(a)) {
+            if(a._VECTptr->size() != 1) return gendimerr(contextptr);
+            a = a._VECTptr->front();
+          }
+#endif
 	  if (a.type==_VECT){
 	    for (int i=deb2.val;i<=fin2.val;++i)
 	      (*(*vptr)[i1]._VECTptr)[i]=(*a._VECTptr)[i-deb2.val];	     
@@ -4763,6 +4943,18 @@ namespace giac {
     if (debug_infolevel>3)
       CERR << CLOCK() << " begin _prod" << endl;
     for (;it!=itend;++it){
+#ifdef BAC_OPTIONS
+      if(it->type == _IDNT) {
+        if(*it == _degF_unit) { //degF unit
+          *logptr(contextptr) << gettext("Temperature Units Warning: Multiplication or division of degF with other units is non-physical.  Substituting deltaF.") << endl;
+          *it = _deltaF_unit;
+        } else if(*it == _degC_unit) { //degC unit
+          *logptr(contextptr) << gettext("Temperature Units Warning: Multiplication or division of degC with other units is non-physical.  Substituting deltaC.") << endl;
+          *it = _deltaC_unit;
+        } else if(*it == _K_unit) *it = _deltaK_unit; // K/deltaK/deltaC
+        else if(*it == _Rankine_unit) *it = _deltaRankine_unit; //Rankine/deltaRankine/deltaF
+      }
+#endif
       if ( (it->type==_SYMB) && (it->_SYMBptr->sommet==at_inv) && (it->_SYMBptr->feuille.type!=_VECT) )
 	prod = rdiv(prod,it->_SYMBptr->feuille,contextptr);
       else {
@@ -4823,8 +5015,18 @@ namespace giac {
       if (b.val==1)
 	return a;
       if (a.type==_IDNT){
-	if (a==undef)
-	  return a;
+        if (a==undef)
+          return a;
+#ifdef BAC_OPTIONS
+        if(a == _degF_unit) { //degF unit
+          *logptr(contextptr) << gettext("Temperature Units Warning: Exponential involving degF is non-physical.  Substituting deltaF.") << endl;
+          return b.val?symbolic(at_pow, makevecteur(new ref_identificateur("_deltaF"),b)):gen(1);
+        } else if(a == _degC_unit) { //degC unit
+          *logptr(contextptr) << gettext("Temperature Units Warning: Exponential involving degC is non-physical.  Substituting deltaC.") << endl;
+          return b.val?symbolic(at_pow, makevecteur(new ref_identificateur("_deltaC"),b)):gen(1);
+        } else if(a == _K_unit) return b.val?symbolic(at_pow, makevecteur(new ref_identificateur("_deltaK"),b)):gen(1); // K/deltaK/deltaC
+        else if(a == _Rankine_unit) return b.val?symbolic(at_pow, makevecteur(new ref_identificateur("_deltaRankine"),b)):gen(1); //Rankine/deltaRankine/deltaF
+#endif
 	if (a!=unsigned_inf)
 	  return b.val?symbolic(at_pow,args):gen(1);
       }
@@ -5030,7 +5232,8 @@ namespace giac {
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     if (args.type!=_VECT)
       return symb_inferieur_strict(args);
-    gen res=inferieur_strict(args._VECTptr->front(),args._VECTptr->back(),contextptr);
+    gen res;
+    res=inferieur_strict(args._VECTptr->front(),args._VECTptr->back(),contextptr);
     if (res.type==_INT_ 
 #ifdef GIAC_HAS_STO_38
 	&& abs_calc_mode(contextptr)!=38
@@ -5059,7 +5262,8 @@ namespace giac {
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     if (args.type!=_VECT)
       return symb_inferieur_egal(args);
-    gen res=inferieur_egal(args._VECTptr->front(), args._VECTptr->back(),contextptr);
+    gen res;
+    res=inferieur_egal(args._VECTptr->front(), args._VECTptr->back(),contextptr);
     if (res.type==_INT_ && abs_calc_mode(contextptr)!=38)
       res.subtype=_INT_BOOLEAN;
     return res;
@@ -5107,7 +5311,8 @@ namespace giac {
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     if (args.type!=_VECT)
       return symb_superieur_egal(args);
-    gen res=superieur_egal(args._VECTptr->front(), args._VECTptr->back(),contextptr);
+    gen res;
+    res=superieur_egal(args._VECTptr->front(), args._VECTptr->back(),contextptr);
     if (res.type==_INT_ && abs_calc_mode(contextptr)!=38)
       res.subtype=_INT_BOOLEAN;
     return res;
@@ -5136,6 +5341,11 @@ namespace giac {
     gen res;
 #if 1
     res=_same(args,contextptr);
+#ifdef BAC_OPTIONS
+    if(is_undef(res)) return res;
+    if(res.type == _VECT) 
+      return _not(res, contextptr);
+#endif
     if (res.type==_INT_)
       return !res;
 #endif
@@ -5158,8 +5368,24 @@ namespace giac {
     else
       return s+gen2string(g,format,contextptr)+')';
   }
+  #ifdef BAC_OPTIONS
+    static string texprintasof_(const gen & feuille,const char * sommetstr,int format,GIAC_CONTEXT){
+      if ( (feuille.type!=_VECT) || (feuille._VECTptr->size()!=2) )
+        return string(sommetstr)+('('+gen2string(feuille,format,contextptr)+')');
+      string s=print_with_parenthesis_if_required(feuille._VECTptr->front(),format,contextptr)+"\\left({";
+      gen & g=feuille._VECTptr->back();
+      if (format==0 && g.type==_VECT && g.subtype==_SEQ__VECT)
+        return s+printinner_VECT(*g._VECTptr,_SEQ__VECT,contextptr)+"}\\right)";
+      else
+        return s+gen2string(g,format,contextptr)+"}\\right)";
+    }
+  #endif
   static string texprintasof(const gen & feuille,const char * sommetstr,GIAC_CONTEXT){
-    return printasof_(feuille,sommetstr,1,contextptr);
+    #ifdef BAC_OPTIONS
+      return texprintasof_(feuille,sommetstr,1,contextptr);
+    #else
+      return printasof_(feuille,sommetstr,1,contextptr);
+    #endif
   }
   static string printasof(const gen & feuille,const char * sommetstr,GIAC_CONTEXT){
     return printasof_(feuille,sommetstr,0,contextptr);
@@ -5320,7 +5546,11 @@ namespace giac {
       return sto(ve,v,contextptr);
     }
     if (f.type<=_POLY || f.type==_FRAC || f.type==_FLOAT_)
+#ifdef BAC_OPTIONS
+      return f * b; // Assume implicit multiplication here
+#else
       *logptr(contextptr) << "Warning, constant function " << f << " applied to " << b << endl;
+#endif
     if ( f.is_symb_of_sommet(at_program) && qf.type==_IDNT ){
       value=f._SYMBptr->feuille;
       if (value.type!=_VECT)
@@ -5363,6 +5593,14 @@ namespace giac {
   string print_with_parenthesis_if_required(const gen & g,int format,GIAC_CONTEXT){
     if (g.type==_SYMB || g.type==_FRAC || g.type==_CPLX || (g.type==_VECT && g.subtype==_SEQ__VECT) )
       return '('+gen2string(g,format,contextptr)+')';
+    #ifdef BAC_OPTIONS
+      else if(g.type == _IDNT && (format == 1)) {
+        giac::function_mode = true;
+        string output = gen2tex(g,contextptr);
+        giac::function_mode = false;
+        return output;
+      }
+    #endif
     else
       return gen2string(g,format,contextptr);
   }
@@ -5426,19 +5664,19 @@ namespace giac {
     }
     if (storcl_38){
       if (v.front().type==_IDNT){
-	gen value;
-	if (storcl_38(value,0,v.front()._IDNTptr->id_name,v.back(),false,contextptr,NULL,false)){ //CdB v.back() is actually never used because the at_of paramter is false. Is that intended?
-	  return value;
-	}
-      }
-      if (v.front().is_symb_of_sommet(at_double_deux_points)){
-	gen & f=v.front()._SYMBptr->feuille;
-	if (f[0].type==_IDNT && f[1].type==_IDNT){
-	  gen value;
-	  if (storcl_38(value,f[0]._IDNTptr->id_name,f[1]._IDNTptr->id_name,v.back(),false,contextptr,NULL,false)){ //CdB v.back() is actually never used because the at_of paramter is false. Is that intended?
-	    return value;
-	  }
-	}
+      	gen value;
+      	if (storcl_38(value,0,v.front()._IDNTptr->id_name,v.back(),false,contextptr,NULL,false)){ //CdB v.back() is actually never used because the at_of paramter is false. Is that intended?
+      	  return value;
+      	}
+            }
+            if (v.front().is_symb_of_sommet(at_double_deux_points)){
+      	gen & f=v.front()._SYMBptr->feuille;
+      	if (f[0].type==_IDNT && f[1].type==_IDNT){
+      	  gen value;
+      	  if (storcl_38(value,f[0]._IDNTptr->id_name,f[1]._IDNTptr->id_name,v.back(),false,contextptr,NULL,false)){ //CdB v.back() is actually never used because the at_of paramter is false. Is that intended?
+      	    return value;
+      	  }
+      	}
       }
     }
     gen a=v.front().eval(eval_level(contextptr),contextptr);
@@ -5446,12 +5684,19 @@ namespace giac {
     if (a.type==_MAP){
       gen_map::const_iterator it=a._MAPptr->find(b),itend=a._MAPptr->end();
       if (it!=itend)
-	return it->second;
+	      return it->second;
       // if (a.subtype==_SPARSE_MATRIX)
-	return 0;
-	//return symb_at(makevecteur(v.front(),b));
+    	return 0;
+    	//return symb_at(makevecteur(v.front(),b));
     }
+#ifdef BAC_OPTIONS
+    gen res = a.operator_at(b,contextptr);
+    if(a.type==_VECT && res.type==_VECT && ckmatrix(*(a._VECTptr)) && !ckmatrix(*(res._VECTptr)) && (int(a._VECTptr->front()._VECTptr->size()) == 1) && (int(res._VECTptr->size()) == 1) && (res._VECTptr->front().type != _VECT)) 
+      return res._VECTptr->front();
+    return res;
+#else
     return a.operator_at(b,contextptr);
+#endif
   }
   static const char _at_s []="at";
   static define_unary_function_eval4_index (165,__at,&giac::_at,_at_s,&printasat,&texprintasat);
@@ -5505,7 +5750,11 @@ namespace giac {
       return "("+printsommetasoperator(feuille,sommetstr,contextptr)+")";
   }
   string texprintasand(const gen & g,const char * s,GIAC_CONTEXT){
+#ifdef BAC_OPTIONS
+    return texprintsommetasoperator(g,"\\and ",contextptr);
+#else
     return texprintsommetasoperator(g,"\\mbox{ and }",contextptr);
+#endif
   }
   symbolic symb_and(const gen & a,const gen & b){
     return symbolic(at_and,gen(makevecteur(a,b),_SEQ__VECT));
@@ -5535,7 +5784,11 @@ namespace giac {
   define_unary_function_ptr5( at_and ,alias_at_and,&__and,_QUOTE_ARGUMENTS,T_AND_OP);
 
   string texprintasor(const gen & g,const char * s,GIAC_CONTEXT){
+#ifdef BAC_OPTIONS
+    return texprintsommetasoperator(g,"\\or ",contextptr);
+#else
     return texprintsommetasoperator(g,"\\mbox{ or }",contextptr);
+#endif
   }
   string printasor(const gen & feuille,const char * sommetstr,GIAC_CONTEXT){
     if (abs_calc_mode(contextptr)==38)
@@ -5870,19 +6123,135 @@ namespace giac {
     gen res=undef;
     if (a._VECTptr->front().type==_SYMB || a._VECTptr->back().type==_SYMB){
       if (!is_inf(a._VECTptr->front()) && !is_undef(a._VECTptr->front()) && !is_inf(a._VECTptr->back()) && !is_undef(a._VECTptr->back()) && a._VECTptr->front().type!=_VECT &&a._VECTptr->back().type!=_VECT ){
-	if (same_warning){
-	  string s=autosimplify(contextptr);
-	  if (unlocalize(s)!="'simplify'"){
-	    *logptr(contextptr) << gettext("Warning, the test a==b is performed by checking\nthat the internal representation of ") << s << gettext("(a-b) is not 0.\nTherefore a==b may return false even if a and b are mathematically equal,\nif they have different internal representations.\nYou can explicitly call a simplification function like simplify(a-b)==0 to avoid this.") << endl;
-	    same_warning=false;
-	  }
-	}
-	res=add_autosimplify(a._VECTptr->front()-a._VECTptr->back(),contextptr);
+#ifdef BAC_OPTIONS 
+        if (a._VECTptr->front().is_symb_of_sommet(at_unit) || a._VECTptr->back().is_symb_of_sommet(at_unit)) {
+          gen a1e = a._VECTptr->front().evalf(1, contextptr);
+          gen a2e = a._VECTptr->back().evalf(1, contextptr);
+          // Temperature checks
+          if((a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back() == _degF_unit))        
+              && (a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back() == _deltaF_unit || a2e._SYMBptr->feuille._VECTptr->back() == _deltaC_unit || a2e._SYMBptr->feuille._VECTptr->back() == _deltaK_unit || a2e._SYMBptr->feuille._VECTptr->back() == _deltaRankine_unit))) {
+            *logptr(contextptr) << gettext("Temperature Units Warning: Comparison of degF with relative temperatures is non-physical.  Substituting deltaF.") << endl;
+            a1e = symbolic(at_unit, makenewvecteur(a1e._SYMBptr->feuille._VECTptr->front(),_Rankine_unit));       
+          } else if((a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back() == _degC_unit))        
+              && (a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back() == _deltaF_unit || a2e._SYMBptr->feuille._VECTptr->back() == _deltaC_unit || a2e._SYMBptr->feuille._VECTptr->back() == _deltaK_unit || a2e._SYMBptr->feuille._VECTptr->back() == _deltaRankine_unit))) {
+            *logptr(contextptr) << gettext("Temperature Units Warning: Comparison of degC with relative temperatures is non-physical.  Substituting deltaC.") << endl;
+            a1e = symbolic(at_unit, makenewvecteur(a1e._SYMBptr->feuille._VECTptr->front(),_K_unit));       
+          } else if((a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back() == _degF_unit))        
+              && (a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back() == _deltaF_unit || a1e._SYMBptr->feuille._VECTptr->back() == _deltaC_unit || a1e._SYMBptr->feuille._VECTptr->back() == _deltaK_unit || a1e._SYMBptr->feuille._VECTptr->back() == _deltaRankine_unit))) {
+            *logptr(contextptr) << gettext("Temperature Units Warning: Comparison of degF with relative temperatures is non-physical.  Substituting deltaF.") << endl;
+            a2e = symbolic(at_unit, makenewvecteur(a2e._SYMBptr->feuille._VECTptr->front(),_Rankine_unit));       
+          } else if((a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back() == _degC_unit))        
+              && (a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back() == _deltaF_unit || a1e._SYMBptr->feuille._VECTptr->back() == _deltaC_unit || a1e._SYMBptr->feuille._VECTptr->back() == _deltaK_unit || a1e._SYMBptr->feuille._VECTptr->back() == _deltaRankine_unit))) {
+            *logptr(contextptr) << gettext("Temperature Units Warning: Comparison of degC with relative temperatures is non-physical.  Substituting deltaC.") << endl;
+            a2e = symbolic(at_unit, makenewvecteur(a2e._SYMBptr->feuille._VECTptr->front(),_K_unit));       
+          }
+          if(a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back()==_degF_unit))
+            a1e = symbolic(at_unit, makenewvecteur(a1e._SYMBptr->feuille._VECTptr->front() + 459.67,_deltaRankine_unit));
+          else if(a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back()==_degC_unit))
+            a1e = symbolic(at_unit, makenewvecteur(a1e._SYMBptr->feuille._VECTptr->front() + 273.15,_deltaK_unit));
+          else if(a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back() == _K_unit))
+            a1e = symbolic(at_unit, makenewvecteur(a1e._SYMBptr->feuille._VECTptr->front(),_deltaK_unit));
+          else if(a1e.is_symb_of_sommet(at_unit) && (a1e._SYMBptr->feuille._VECTptr->back() == _Rankine_unit))
+            a1e = symbolic(at_unit, makenewvecteur(a1e._SYMBptr->feuille._VECTptr->front(),_deltaRankine_unit));
+          if(a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back()==_degF_unit))
+            a2e = symbolic(at_unit, makenewvecteur(a2e._SYMBptr->feuille._VECTptr->front() + 459.67,_deltaRankine_unit));
+          else if(a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back()==_degC_unit))
+            a2e = symbolic(at_unit, makenewvecteur(a2e._SYMBptr->feuille._VECTptr->front() + 273.15,_deltaK_unit));
+          else if(a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back() == _K_unit))
+            a2e = symbolic(at_unit, makenewvecteur(a2e._SYMBptr->feuille._VECTptr->front(),_deltaK_unit));
+          else if(a2e.is_symb_of_sommet(at_unit) && (a2e._SYMBptr->feuille._VECTptr->back() == _Rankine_unit))
+            a2e = symbolic(at_unit, makenewvecteur(a2e._SYMBptr->feuille._VECTptr->front(),_deltaRankine_unit));
+
+          gen tmp = chk_not_unit_together(a1e,a2e,true,contextptr);
+          if(is_undef(tmp) && !is_zero(a1e) && !is_zero(a2e)) {
+#ifdef BAC_OPTIONS
+            int rads = is_rads_Hz(a1e,a2e, contextptr);
+            // Test for 1/s <-> rad/s
+            if(rads == 1) {
+              // 1/s < rad/s
+              a1e = a1e*symbolic(at_unit,makenewvecteur(2 * cst_pi,_rad_unit));
+            }
+            if(rads == -1) {
+              // rad/s > 1/s
+              a2e = a2e*symbolic(at_unit,makenewvecteur(2 * cst_pi,_rad_unit));
+            } else
+#endif
+            return tmp;
+          }
+          res = _simplify(mksa_value(a1e - a2e, contextptr),contextptr);
+          if(is_greater(1e-6,abs(res,contextptr),contextptr)) res = zero; // Deal with float rounding errors
+        } else
+          res = _simplify(a._VECTptr->front() - a._VECTptr->back(), contextptr);
+#else
+        if (same_warning){
+          string s=autosimplify(contextptr);
+          if (unlocalize(s)!="'simplify'"){
+            *logptr(contextptr) << gettext("Warning, the test a==b is performed by checking\nthat the internal representation of ") << s << gettext("(a-b) is not 0.\nTherefore a==b may return false even if a and b are mathematically equal,\nif they have different internal representations.\nYou can explicitly call a simplification function like simplify(a-b)==0 to avoid this.") << endl;
+            same_warning=false;
+          }
+        }
+        res=add_autosimplify(a._VECTptr->front()-a._VECTptr->back(),contextptr);
+#endif
 	if (res.type==_SYMB)
 	  res=res._SYMBptr->sommet(res._SYMBptr->feuille,contextptr);
 	res=is_zero(res,contextptr);
       }
     }
+
+#ifdef BAC_OPTIONS 
+    if(a._VECTptr->front().type == _VECT) {
+      if(a._VECTptr->back().type == _VECT) {
+        if(ckmatrix(a._VECTptr->front())) {
+          if(ckmatrix(a._VECTptr->back())) {
+            if (a._VECTptr->front()._VECTptr->front()._VECTptr->size()!=a._VECTptr->back()._VECTptr->front()._VECTptr->size())
+              return gendimerr("");
+          } else
+            return gendimerr("");
+        } else if(ckmatrix(a._VECTptr->back()))
+          return gendimerr("");
+        if (a._VECTptr->front()._VECTptr->size()!=a._VECTptr->back()._VECTptr->size()) 
+          return gendimerr("");
+        vecteur res, res2;
+        const_iterateur it=a._VECTptr->front()._VECTptr->begin(),itend=a._VECTptr->front()._VECTptr->end();
+        const_iterateur it2=a._VECTptr->back()._VECTptr->begin(),it2end=a._VECTptr->back()._VECTptr->end();
+        res.clear();
+        res.reserve(itend-it);
+        for (;it!=itend;++it) {
+          if (it->type==_VECT){
+            res.push_back(_same(makevecteur(*it->_VECTptr,*it2->_VECTptr),contextptr));
+          } else
+            res.push_back(_same(makevecteur(*it,*it2),contextptr));
+          ++it2;
+        }
+        return res;
+      } else {
+        vecteur res;
+        const_iterateur it=a._VECTptr->front()._VECTptr->begin(),itend=a._VECTptr->front()._VECTptr->end();
+        res.clear();
+        res.reserve(itend-it);
+        for (;it!=itend;++it) {
+          if (it->type==_VECT){
+            res.push_back(_same(makevecteur(*it->_VECTptr,a._VECTptr->back()),contextptr));
+          } else
+            res.push_back(_same(makevecteur(*it,a._VECTptr->back()),contextptr));
+        }
+        return res;
+      }
+    } 
+    if(a._VECTptr->back().type == _VECT) {
+      vecteur res;
+      const_iterateur it=a._VECTptr->back()._VECTptr->begin(),itend=a._VECTptr->back()._VECTptr->end();
+      res.clear();
+      res.reserve(itend-it);
+      for (;it!=itend;++it) {
+        if (it->type==_VECT){
+          res.push_back(_same(makevecteur(a._VECTptr->front(),*it->_VECTptr),contextptr));
+        } else
+          res.push_back(_same(makevecteur(a._VECTptr->front(),*it),contextptr));
+      }
+      return res;
+    }
+#endif
     if (is_undef(res))
       res=operator_equal(a._VECTptr->front(),a._VECTptr->back(),contextptr);
     if (res.type==_INT_ && abs_calc_mode(contextptr)!=38)
@@ -6342,10 +6711,21 @@ namespace giac {
   static symbolic symb_floor(const gen & a){
     return symbolic(at_floor,a);
   }
-  gen apply_unit(const gen & args,const gen_op_context & f,GIAC_CONTEXT){
+#ifdef BAC_OPTIONS
+  gen apply_unit(const gen & args_in,const gen_op_context & f,GIAC_CONTEXT){
+    gen args = _usimplify(args_in, contextptr);
+    *logptr(contextptr) << "Warning: Rounding assumes units of '" << args._SYMBptr->feuille[1] << "'. Change default units in settings to alter this behavior." << endl;
+#else
+  gen apply_unit(const gen & args,const gen_op_context & f,GIAC_CONTEXT) {
+#endif
     return symbolic(at_unit,gen(makevecteur(f(args._SYMBptr->feuille[0],contextptr),args._SYMBptr->feuille[1]),_SEQ__VECT));  
   }
+#ifdef BAC_OPTIONS
+  gen _floor(const gen & a_in,GIAC_CONTEXT){
+    gen args = _usimplify_base(a_in, contextptr);
+#else
   gen _floor(const gen & args,GIAC_CONTEXT){
+#endif
     if ( args.type==_STRNG && args.subtype==-1) return  args;
     if (is_equal(args))
       return apply_to_equal(args,_floor,contextptr);
@@ -6549,7 +6929,12 @@ namespace giac {
   }
 
   // static symbolic symb_round(const gen & a){    return symbolic(at_round,a);  }
+#ifdef BAC_OPTIONS
+  gen _round(const gen & a_in,GIAC_CONTEXT){
+    gen args = _usimplify_base(a_in, contextptr);
+#else
   gen _round(const gen & args,GIAC_CONTEXT){
+#endif
     if ( is_undef(args))
       return args;
     if (args.type==_STRNG && args.subtype==-1) return  args;

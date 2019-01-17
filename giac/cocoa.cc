@@ -2,7 +2,6 @@
 // Thanks to Zoltan Kovacs for motivating this work, in order to improve geogebra theorem proving
 // Special thanks to Anna M. Bigatti from CoCoA team for insightfull discussions on how to choose an order for elimination
 #include "giacPCH.h"
-
 #ifndef WIN32
 #define COCOA9950
 #endif

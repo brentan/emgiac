@@ -79,6 +79,10 @@ namespace giac {
 #undef HAVE_LIBMPFR
 #endif
 
+  #ifdef BAC_OPTIONS
+    extern int matrix_depth;
+  #endif
+
   void my_mpz_gcd(mpz_t &z,const mpz_t & A,const mpz_t & B);
 
   class gen ; 
@@ -117,6 +121,12 @@ namespace giac {
   gen gentoomanyargs(const std::string & s,GIAC_CONTEXT0);
   gen genmaxordererr(GIAC_CONTEXT0);
   gen genstabilityerr(GIAC_CONTEXT0);
+  gen evalf2double_nock(const gen & g0,int level,const context * contextptr);
+#ifdef EMCC
+  void print_emscripten(const gen & e, const std::string pre_text);
+  void print_emscripten(const std::string pre_text);
+  void a(const gen & e);
+#endif
 
   // short integer arithmetic
   int absint(int a);
@@ -711,6 +721,9 @@ namespace giac {
     // inline gen evalf() const { return evalf(DEFAULT_EVAL_LEVEL,context0); }
     gen evalf_double(int level,const context * contextptr) const ;
     gen evalf2double(int level,const context * contextptr) const;
+
+    void print_emscripten(const std::string pre_text) const;
+    void print_emscripten() const;
 #if defined SMARTPTR64 
     gen & operator = (const gen & a){
       ulonglong al=*((ulonglong *) &a);
@@ -958,6 +971,7 @@ namespace giac {
   gen makemap(); // make a new map
   gen chartab2gen(char * s,GIAC_CONTEXT);
 
+  std::string get_error_message(const gen & e);
 
   bool is_zero(const gen & a,GIAC_CONTEXT0);
   bool is_exactly_zero(const gen & a);
@@ -965,6 +979,7 @@ namespace giac {
   bool is_minus_one(const gen & a);
   bool is_sq_minus_one(const gen & a);
   bool is_inf(const gen & e);
+  bool is_error(const gen & e);
   bool is_undef(const gen & e);
   bool is_undef(const polynome & p);
   bool is_undef(const vecteur & v);
@@ -1309,6 +1324,9 @@ namespace giac {
   std::string printinner_VECT(const vecteur & v, int subtype,GIAC_CONTEXT);
   std::string & add_printinner_VECT(std::string & s,const vecteur &v,int subtype,GIAC_CONTEXT);
   std::string begin_VECT_string(int subtype,bool tex,GIAC_CONTEXT);
+  #ifdef BAC_OPTIONS
+    std::string mid_VECT_string(int subtype,bool tex,GIAC_CONTEXT);
+  #endif
   std::string end_VECT_string(int subtype,bool tex,GIAC_CONTEXT);
   std::string print_VECT(const vecteur & v,int subtype,GIAC_CONTEXT); // subtype was 0 by default
   std::string print_SPOL1(const sparse_poly1 & p,GIAC_CONTEXT);

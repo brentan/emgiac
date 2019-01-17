@@ -228,7 +228,11 @@
       {"hybrids_solver"         ,1, _HYBRIDS_SOLVER, _INT_SOLVER,T_NUMBER},
       {"hybridsj_solver"         ,1, _HYBRIDSJ_SOLVER, _INT_SOLVER,T_NUMBER},
       {"identifier"            ,0, _IDNT, _INT_TYPE, T_TYPE_ID},
+      #ifdef BAC_OPTIONS
+      {"within",0,0,0,T_IN}, // Renaming since '_in' is more important to me for inch than this control name. 
+      #else
       {"in",0,0,0,T_IN},
+      #endif
       {"integer"               ,0, _ZINT, _INT_TYPE, T_TYPE_ID},
       {"intersect",0,0,0,T_INTERSECT},
       {"invisible_point"         ,1, _POINT_INVISIBLE , _INT_COLOR ,T_NUMBER},

@@ -346,7 +346,11 @@ namespace giac {
 #if defined(EMCC) && !defined(PNACL)
       return emcctime()/1e6;
 #endif
-      return total_time(contextptr);
+      #ifdef BAC_OPTIONS
+        return emcctime();
+      #else
+        return total_time(contextptr);
+      #endif
     }
     double delta;
     int ntimes=1,i=0;

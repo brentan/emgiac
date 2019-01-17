@@ -71,8 +71,10 @@
 #ifdef EMCC
 #define CERR std::cout
 extern "C" double emcctime(); 
+#ifndef BAC_OPTIONS
 extern "C" int glinit(int,int,int,int,int);
 extern "C" void glcontext(int);
+#endif
 #define CLOCK emcctime
 #define CLOCK_T clock_t
 #else
@@ -503,7 +505,7 @@ inline float fgamma(float f1){ return tgammaf(f1); }
 #if defined(__MINGW_H) || defined(VISUALC) // FIXME gamma, not used
 inline float fgamma(float f1){ return f1; }
 #else
-inline float fgamma(float f1){ return gammaf(f1); } // or tgammaf(f1) on some versions of emscripten
+inline float fgamma(float f1){ return tgammaf(f1); } // or tgammaf(f1) on some versions of emscripten
 #endif
 #endif
 inline float atan2f(float f1,float f2,int rad){ if (rad) return atan2f(f1,f2); else return atan2f(f1,f2)*180/M_PI;}

@@ -264,7 +264,8 @@ AN	[0-9a-zA-Z_~ ?\200-\355\357-\376]
 
 %%
 
-[ \t\\]+			/* skip whitespace */
+[ 
+\t\\]+			/* skip whitespace */
 \n                increment_lexer_line_number_setcol(yyscanner,yyextra); //CERR << "Scanning line " << lexer_line_number(yyextra) << endl;
   /* Strings */
   /* \"[^\"]*\"        yylval = string2gen( giac_yytext); return T_STRING; */

@@ -3297,13 +3297,92 @@ namespace giac {
 #endif
     keep_acosh_asinh(b_acosh,contextptr);
     if (x._IDNTptr->quoted)
-      *x._IDNTptr->quoted=quoted;    
+      *x._IDNTptr->quoted=quoted;  
     if (s>4 || (approx_mode(contextptr) && (s==4)) ){
       v[1]=x;
       return intnum(gen(v,_SEQ__VECT),false,contextptr,true);
     }
     gen rem,borne_inf,borne_sup,res,v0orig,aorig,borig;
     if (s==4){
+
+#ifdef BAC_OPTIONS
+      gen xval=x.eval(1,contextptr);
+      gen a(v[2]),b(v[3]);
+      if(!is_one(get_units(a)) && evalf_double(remove_units(a),1,contextptr).type==_DOUBLE_) {
+        if(!is_one(get_units(b)) && evalf_double(remove_units(b),1,contextptr).type==_DOUBLE_) {
+          // Ensure matching units:
+          if(mksa_reduce_base(a,contextptr) == mksa_reduce_base(b,contextptr)) {
+            // Convert lower limit to upper limit:
+            a = _usimplify_base(_ufactor(makesequence(a,symbolic(at_unit, makevecteur(plus_one, get_units(b)))),contextptr),contextptr);
+            // Find limit units:
+            gen limit_units = get_units(b);
+            // Plugin units to expression:
+            context * newcontextptr= clone_context(contextptr);
+            purgenoassume(xval,newcontextptr);
+            // Expand expression (same as plot_preprocess basically):
+            vecteur lv = lidnt(v[0]);
+            vecteur lw(lv);
+            for(int j=0; j<int(lw.size());++j)
+              lw[j] = eval(lv[j], contextptr);
+            v[0] = quotesubst(v[0], lv, lw, contextptr);
+            // Plug in our units so we can strip them from limits:
+            v[0]=quotesubst(v[0],xval,xval * symbolic(at_unit, makevecteur(plus_one,limit_units)),contextptr);
+            // Strip units from limit:
+            v[2] = remove_units(a);
+            v[3] = remove_units(b);
+            return _integrate(v,contextptr) * symbolic(at_unit, makevecteur(plus_one,limit_units));
+          } else {
+            std::string out = "Incompatible units: Integral lower limit has units of '";
+            out += gen2string(get_units(a)) + "' and upper limit units of '" + gen2string(get_units(b)) + "'";
+            return gensizeerr(gettext(out.data()));
+          }
+        }
+        if(is_zero(b)) {
+          // Find limit units:
+          gen limit_units = get_units(a);
+          // Plugin units to expression:
+          context * newcontextptr= clone_context(contextptr);
+          purgenoassume(xval,newcontextptr);
+          // Expand expression (same as plot_preprocess basically):
+          vecteur lv = lidnt(v[0]);
+          vecteur lw(lv);
+          for(int j=0; j<int(lw.size());++j)
+            lw[j] = eval(lv[j], contextptr);
+          v[0]=quotesubst(v[0], lv, lw, contextptr);
+          v[0]=quotesubst(v[0],xval,xval * symbolic(at_unit, makevecteur(plus_one,limit_units)),contextptr);
+          // Strip units from limit:
+          v[2] = remove_units(a);
+          return _integrate(v,contextptr) * symbolic(at_unit, makevecteur(plus_one,limit_units));
+        } else if(evalf_double(b,1,contextptr).type==_DOUBLE_) {
+          std::string out = "Incompatible units: Integral lower limit has units of '";
+          out += gen2string(get_units(a)) + "' but upper limit has no units.";
+          return gensizeerr(gettext(out.data()));
+        } 
+      }
+      if(!is_one(get_units(b)) && evalf_double(remove_units(b),1,contextptr).type==_DOUBLE_) {
+        if(is_zero(a)) {
+          // Find limit units:
+          gen limit_units = get_units(b);
+          // Plugin units to expression:
+          context * newcontextptr= clone_context(contextptr);
+          purgenoassume(xval,newcontextptr);
+          // Expand expression (same as plot_preprocess basically):
+          vecteur lv = lidnt(v[0]);
+          vecteur lw(lv);
+          for(int j=0; j<int(lw.size());++j)
+            lw[j] = eval(lv[j], contextptr);
+          v[0]=quotesubst(v[0], lv, lw, contextptr);
+          v[0]=quotesubst(v[0],xval,xval * symbolic(at_unit, makevecteur(plus_one,limit_units)),contextptr);
+          // Strip units from limit:
+          v[3] = remove_units(b);
+          return _integrate(v,contextptr) * symbolic(at_unit, makevecteur(plus_one,limit_units));
+        } else if(evalf_double(a,1,contextptr).type==_DOUBLE_) {
+          std::string out = "Incompatible units: Integral lower limit has no units but upper limit has units of '";
+          out += gen2string(get_units(b)) + "'";
+          return gensizeerr(gettext(out.data()));
+        } 
+      }
+#endif
       if ( (has_num_coeff(v[0]) ||
 	    v[2].type==_FLOAT_ || v[2].type==_DOUBLE_ || v[2].type==_REAL ||
 	    v[3].type==_FLOAT_ || v[3].type==_DOUBLE_ || v[3].type==_REAL)){
@@ -3618,20 +3697,37 @@ namespace giac {
   }
   static const char _integrate_s []="integrate";
   static string texprintasintegrate(const gen & g,const char * s_orig,GIAC_CONTEXT){
-    string s("\\int ");
-    if (g.type!=_VECT)
-      return s+gen2tex(g,contextptr);
-    vecteur v(*g._VECTptr);
-    int l(int(v.size()));
-    if (!l)
+    #ifndef BAC_OPTIONS
+      string s("\\int ");
+      if (g.type!=_VECT)
+        return s+gen2tex(g,contextptr);
+      vecteur v(*g._VECTptr);
+      int l(int(v.size()));
+      if (!l)
+        return s;
+      if (l==1)
+        return s+gen2tex(v.front(),contextptr);
+      if (l==2)
+        return s+gen2tex(v.front(),contextptr)+"\\, d"+gen2tex(v.back(),contextptr);
+      if (l==4)
+        return s+"_{"+gen2tex(v[2],contextptr)+"}^{"+gen2tex(v[3],contextptr)+"}"+gen2tex(v.front(),contextptr)+"\\, d"+gen2tex(v[1],contextptr);
       return s;
-    if (l==1)
-      return s+gen2tex(v.front(),contextptr);
-    if (l==2)
-      return s+gen2tex(v.front(),contextptr)+"\\, d"+gen2tex(v.back(),contextptr);
-    if (l==4)
-      return s+"_{"+gen2tex(v[2],contextptr)+"}^{"+gen2tex(v[3],contextptr)+"}"+gen2tex(v.front(),contextptr)+"\\, d"+gen2tex(v[1],contextptr);
-    return s;
+    #else
+      string s("\\int");
+      if (g.type!=_VECT)
+        return s+" "+gen2tex(g,contextptr);
+      vecteur v(*g._VECTptr);
+      int l(v.size());
+      if (!l)
+        return s+" ";
+      if (l==1)
+        return s+" "+gen2tex(v.front(),contextptr);
+      if (l==2)
+        return s+"n_{" + gen2tex(v.back(),contextptr) + "}\\left({" + gen2tex(v.front(),contextptr) + "}\\right)";
+      if (l==4)
+        return s+"_{"+gen2tex(v[2],contextptr)+"}^{"+gen2tex(v[3],contextptr)+"}_{" + gen2tex(v[1],contextptr) + "}\\left({" + gen2tex(v.front(),contextptr) + "}\\right)";
+      return s+" ";
+    #endif
   }
   static define_unary_function_eval4_quoted (__integrate,&_integrate,_integrate_s,0,&texprintasintegrate);
   define_unary_function_ptr5( at_integrate ,alias_at_integrate,&__integrate,_QUOTE_ARGUMENTS,true);
@@ -3804,8 +3900,17 @@ namespace giac {
     return true;
   }
 #else // using -1..1 scaling instead of 0..1
+#ifdef BAC_OPTIONS
+  static bool tegral_util(const gen & f,const gen &x, const gen &a,const gen &b,gen & i30,gen & i30abs, gen &err,const bool do_mksa,const gen & limit_unit,const gen & f_unit,GIAC_CONTEXT){
+#else
   static bool tegral_util(const gen & f,const gen &x, const gen &a,const gen &b,gen & i30,gen & i30abs, gen &err,GIAC_CONTEXT){
+#endif
+#ifdef BAC_OPTIONS
+    gen h=(b-a),i14,i6;
+    if(!do_mksa) h = evalf_double(h,1,contextptr);
+#else
     gen h=evalf_double(b-a,1,contextptr),i14,i6;
+#endif
     //int s30=15,s14=14,s6=6;
     long_double c30[]={-0.98799251802048542849,-0.93727339240070590430,-0.84820658341042721620,-0.72441773136017004742,-0.57097217260853884754,-0.39415134707756336990,-0.20119409399743452230,0.00000000000000000000,0.20119409399743452230,0.39415134707756336990,0.57097217260853884754,0.72441773136017004742,0.84820658341042721620,0.93727339240070590430,0.98799251802048542849};
     long_double b30[]={0.15376620998058634177e-1,0.35183023744054062355e-1,0.53579610233585967506e-1,0.69785338963077157224e-1,0.83134602908496966777e-1,0.93080500007781105513e-1,0.99215742663555788228e-1,0.10128912096278063644,0.99215742663555788228e-1,0.93080500007781105514e-1,0.83134602908496966777e-1,0.69785338963077157224e-1,0.53579610233585967507e-1,0.35183023744054062355e-1,0.15376620998058634177e-1};
@@ -3814,18 +3919,22 @@ namespace giac {
     vecteur v30(15),v30abs(15);
     for (int i=0;i<15;i++){
       v30[i]=evalf_double(eval(subst(f,x,((a+b)+double(c30[i])*h)/2,false,contextptr),1,contextptr),1,contextptr);
+#ifdef BAC_OPTIONS
+      if(do_mksa) v30abs[i]=_l2norm(mksa_value(evalf(v30[i],eval_level(contextptr),contextptr),contextptr),contextptr);
+      else
+#endif
       v30abs[i]=_l2norm(v30[i],contextptr);
       if (v30abs[i].type!=_DOUBLE_)
-	return false;
+	      return false;
     }
     i30abs=i30=i14=i6=0;
     for (int i=0;i<=7;i++){
       i30 += double(b30[i])*v30[i];
       if (i<7)
-	i30 += double(b30[14-i])*v30[14-i];
+	      i30 += double(b30[14-i])*v30[14-i];
       i30abs += double(b30[i])*v30abs[i];
       if (i<7)
-	i30abs += double(b30[14-i])*v30abs[14-i];
+	      i30abs += double(b30[14-i])*v30abs[14-i];
     }
     for (int i=0;i<=6;i++){
       i14 += double(b14[i])*v30[i];
@@ -3835,13 +3944,24 @@ namespace giac {
     }
     for (int i=1;i<15;i+=2){
       if (i==7)
-	continue;
+	      continue;
       i6 += double(b6[(i-1)/2])*v30[i];
     }
+#ifdef BAC_OPTIONS
+      if(do_mksa) {
+        i30 = evalf(remove_units(h)*mksa_value(evalf(i30,eval_level(contextptr),contextptr),contextptr),eval_level(contextptr),contextptr);
+        i30abs = evalf(remove_units(h)*mksa_value(evalf(i30abs,eval_level(contextptr),contextptr),contextptr),eval_level(contextptr),contextptr);
+        i14 = evalf(remove_units(h)*mksa_value(evalf(i14,eval_level(contextptr),contextptr),contextptr),eval_level(contextptr),contextptr);
+        i6 = evalf(remove_units(h)*mksa_value(evalf(i6,eval_level(contextptr),contextptr),contextptr),eval_level(contextptr),contextptr);
+      } else {
+#endif
     i30 = i30*h;
     i30abs = i30abs*h;
     i14 = i14*h;
     i6 = i6*h;
+#ifdef BAC_OPTIONS
+    }
+#endif
     gen err1=_l2norm(i30-i14,contextptr);
     gen err2=_l2norm(i30-i6,contextptr);
     if (is_exactly_zero(err1) || is_exactly_zero(err2))
@@ -3849,13 +3969,18 @@ namespace giac {
     else {
       // check if err1 and err2 corresponds to errors in h^14 and h^6
       if (is_greater(abs(14./6.-ln(err1,contextptr)/ln(err2,contextptr)),.1,contextptr))
-	err=err1;
+	      err=err1;
       else {
-	err=err1/err2;
-	err=err1*(err*err);
+      	err=err1/err2;
+      	err=err1*(err*err);
       }
     }
     return true;
+  }
+#endif
+#ifdef BAC_OPTIONS
+  static bool tegral_util(const gen & f,const gen &x, const gen &a,const gen &b,gen & i30,gen & i30abs, gen &err,GIAC_CONTEXT){
+    return tegral_util(f,x,a,b,i30,i30abs,err,false,plus_one,plus_one,contextptr);
   }
 #endif
 
@@ -3895,7 +4020,11 @@ namespace giac {
   }
 
   // nmax=max number of subdivisions (may be 1000 or more...)
+#ifdef BAC_OPTIONS
+  bool tegral(const gen & f,const gen & x,const gen & a_,const gen &b_,const gen & eps,int nmax,gen & value,bool exactcheck,const bool do_mksa,const gen & limit_unit,const gen & f_unit,GIAC_CONTEXT){
+#else
   bool tegral(const gen & f,const gen & x,const gen & a_,const gen &b_,const gen & eps,int nmax,gen & value,bool exactcheck,GIAC_CONTEXT){
+#endif    
     gen a=evalf(a_,1,contextptr),b=evalf(b_,1,contextptr);
     if (a==b){
       value=0.0;
@@ -3919,78 +4048,163 @@ namespace giac {
     // adaptive integration, cf. Hairer
     gen i30,i30abs,err,maxerr,ERR,I30ABS;
     int maxerrpos;
+#ifdef BAC_OPTIONS
+    if (!tegral_util(f,x,a,b,i30,i30abs,err,do_mksa,limit_unit,f_unit,contextptr))
+#else
     if (!tegral_util(f,x,a,b,i30,i30abs,err,contextptr))
+#endif
       return false;
     vecteur v(1,makevecteur(a,b,i30,i30abs,err));
-    for (;int(v.size())<nmax;){
+    for (;int(v.size())<nmax;) {
       // sum of errors, check for end
       i30=I30ABS=ERR=maxerr=0;
       maxerrpos=0;
       for (unsigned i=0;i<v.size();++i){
-	if (v[i].type!=_VECT || v[i]._VECTptr->size()<5)
-	  return false;
-	vecteur w=*v[i]._VECTptr;
-	i30 = i30+w[2]; // += does not work in emscripten
-	I30ABS = I30ABS+w[3];
-	ERR = ERR+w[4];
-	if (is_strictly_greater(w[4],maxerr,contextptr)){
-	  maxerrpos=i;
-	  maxerr=w[4];
-	}
+      	if (v[i].type!=_VECT || v[i]._VECTptr->size()<5)
+      	  return false;
+      	vecteur w=*v[i]._VECTptr;
+      	i30 = i30+w[2]; // += does not work in emscripten
+      	I30ABS = I30ABS+w[3];
+      	ERR = ERR+w[4];
+      	if (is_strictly_greater(w[4],maxerr,contextptr)){
+      	  maxerrpos=i;
+      	  maxerr=w[4];
+      	}
       }
+#ifdef BAC_OPTIONS
+      value = apply_units(i30, limit_unit*f_unit);
+#else
       value=i30;
+#endif
       // minimal number of intervals added for int(frac(x),x,0,6.4)
       if (!is_undef(ERR) && is_greater(eps,ERR/I30ABS,contextptr)) 
-	return true;
+	      return true;
       // cut interval at maxerrpos in 2 parts
       vecteur & w = *v[maxerrpos]._VECTptr;
       gen A=w[0],B=w[1],C=(A+B)/2;
       if (A==C || B==C){
-	// can not subdivise anymore
-	if (is_greater(1e-4,ERR/I30ABS,contextptr)){
-	  *logptr(contextptr) << "Low accuracy, error estimate " << ERR/I30ABS << "\nError might be underestimated if initial boundary was +/-infinity" << endl;
-	  return true;
-	}
-	return false; 
+      	// can not subdivise anymore
+      	if (is_greater(1e-4,ERR/I30ABS,contextptr)){
+      	  *logptr(contextptr) << "Low accuracy, error estimate " << ERR/I30ABS << "\nError might be underestimated if initial boundary was +/-infinity" << endl;
+      	  return true;
+      	}
+      	return false; 
       }
+#ifdef BAC_OPTIONS
+      if (!tegral_util(f,x,A,C,i30,i30abs,err,do_mksa,limit_unit,f_unit,contextptr)){
+#else
       if (!tegral_util(f,x,A,C,i30,i30abs,err,contextptr)){
-	if (is_greater(1e-4,ERR/I30ABS,contextptr)){
-	  *logptr(contextptr) << "Low accuracy, error estimate " << ERR/I30ABS << "\nError might be underestimated if initial boundary was +/-infinity" << endl;
-	  return true;
-	}
-	return false;
+#endif
+      	if (is_greater(1e-4,ERR/I30ABS,contextptr)){
+      	  *logptr(contextptr) << "Low accuracy, error estimate " << ERR/I30ABS << "\nError might be underestimated if initial boundary was +/-infinity" << endl;
+      	  return true;
+      	}
+      	return false;
       }
       v[maxerrpos]=makevecteur(A,C,i30,i30abs,err);
+#ifdef BAC_OPTIONS
+      if (!tegral_util(f,x,C,B,i30,i30abs,err,do_mksa,limit_unit,f_unit,contextptr)){
+#else
       if (!tegral_util(f,x,C,B,i30,i30abs,err,contextptr)){
-	if (is_greater(1e-4,ERR/I30ABS,contextptr)){
-	  *logptr(contextptr) << "Low accuracy, error estimate " << ERR/I30ABS << "\nError might be underestimated if initial boundary was +/-infinity" << endl;
-	  return true;
-	}
-	return false;
+#endif
+      	if (is_greater(1e-4,ERR/I30ABS,contextptr)){
+      	  *logptr(contextptr) << "Low accuracy, error estimate " << ERR/I30ABS << "\nError might be underestimated if initial boundary was +/-infinity" << endl;
+      	  return true;
+      	}
+      	return false;
       }
       v.push_back(makevecteur(C,B,i30,i30abs,err));
     }
     return false; // too many iterations
   }
+#ifdef BAC_OPTIONS
+  bool tegral(const gen & f,const gen & x,const gen & a_,const gen &b_,const gen & eps,int nmax,gen & value,bool exactcheck,GIAC_CONTEXT){
+    return tegral(f,x,a_,b_,eps,nmax,value,exactcheck,false,plus_one,plus_one,contextptr);
+  }
+#endif
 
   gen romberg(const gen & f0,const gen & x0,const gen & a,const gen &b,const gen & eps,int nmax,GIAC_CONTEXT){
     return evalf_int(f0,x0,a,b,eps,nmax,true,contextptr,false);
   }
-  gen evalf_int(const gen & f0,const gen & x0,const gen & a,const gen &b,const gen & eps,int nmax,bool romberg_method,GIAC_CONTEXT,bool exactcheck){
+  gen evalf_int(const gen & f0,const gen & x0,const gen & a_,const gen & b_,const gen & eps,int nmax,bool romberg_method,GIAC_CONTEXT,bool exactcheck){
     gen x(x0),f(f0);
+    gen a = a_;
+    gen b = b_;
     if (x.type!=_IDNT){
       x=identificateur(" x");
       f=subst(f,x0,x,false,contextptr);
     }
     gen value=undef;
+    // a, b and eps should be evalf-ed, and eps>0
+#ifdef BAC_OPTIONS
+    gen limit_unit = plus_one;
+    gen f_unit = plus_one;
+    if(!is_one(get_units(a)) && evalf_double(remove_units(a),1,contextptr).type==_DOUBLE_) {
+      if(!is_one(get_units(b)) && evalf_double(remove_units(b),1,contextptr).type==_DOUBLE_) {
+        // Ensure matching units:
+        if(mksa_reduce_base(a,contextptr) == mksa_reduce_base(b,contextptr)) {
+          limit_unit = get_units(mksa_reduce_base(a,contextptr));
+        } else {
+          std::string out = "Incompatible units: Integral lower limit has units of '";
+          out += gen2string(get_units(a)) + "' and upper limit units of '" + gen2string(get_units(b)) + "'";
+          return gensizeerr(gettext(out.data()));
+        }
+      } else if(is_zero(b)) {
+        limit_unit = get_units(mksa_reduce_base(a,contextptr));
+      } else if(evalf_double(b,1,contextptr).type==_DOUBLE_) {
+        std::string out = "Incompatible units: Integral lower limit has units of '";
+        out += gen2string(get_units(a)) + "' but upper limit has no units.";
+        return gensizeerr(gettext(out.data()));
+      }
+    } else if(!is_one(get_units(b)) && evalf_double(remove_units(b),1,contextptr).type==_DOUBLE_) {
+      if(is_zero(a)) {
+        limit_unit = get_units(mksa_reduce_base(b,contextptr));
+      } else if(evalf_double(a,1,contextptr).type==_DOUBLE_) {
+        std::string out = "Incompatible units: Integral lower limit has no units but upper limit has units of '";
+        out += gen2string(get_units(b)) + "'";
+        return gensizeerr(gettext(out.data()));
+      }
+    }
+    bool do_mksa = false;
+    // Test for temp units:
+    if(_usimplify_hits_temperature(evalf(eval(f,eval_level(contextptr),contextptr),1,contextptr),contextptr) || _usimplify_hits_temperature(get_units(a),contextptr) || _usimplify_hits_temperature(get_units(b),contextptr)) {
+      // BUMMER!  Need to deal with temperature units
+      f_unit = mksa_reduce_base(evalf(eval(subst(f,x,(is_zero(a) ? b : a)*gen(0.9925165489491),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr); 
+      a = _usimplify_base(_ufactor(makesequence(a,symbolic(at_unit, makevecteur(plus_one, get_units(b)))),contextptr),contextptr);
+      limit_unit = get_units(b);
+      do_mksa = true;
+    } else {
+      a = mksa_value(a,contextptr);
+      b = mksa_value(b,contextptr);
+      f_unit = get_units(mksa_reduce_base(evalf(eval(subst(f,x,(is_zero(a) ? b : a)*gen(0.9925165489491) * symbolic(at_unit, makevecteur(plus_one,limit_unit)),false,contextptr),eval_level(contextptr),contextptr),1,contextptr),contextptr)); 
+      f = mksa_value(evalf(eval(f,1,contextptr),1,contextptr), contextptr);
+      if(is_undef(f)) {
+        // Could not simplify F!  GRR!  Have to do a full mksa
+        do_mksa = true;
+        b = b_;
+        a = _usimplify_base(_ufactor(makesequence(a_,symbolic(at_unit, makevecteur(plus_one, get_units(b)))),contextptr),contextptr);
+        limit_unit = get_units(b);
+        f = f0;
+      }
+    }
+    if(is_error(f_unit)) return f_unit;
+    if(is_undef(f_unit)) return symbolic(at_integrate,makesequence(f0,x0,a_,b_)); //gensizeerr("Could not determine units of function using either upper or lower limit.  Ensure integrand is defined at limits.");
+    if (!romberg_method && tegral(f,x,a,b,eps,(1 << nmax),value,exactcheck,do_mksa,limit_unit,f_unit,contextptr))
+      return value;
+#else
     if (!romberg_method && tegral(f,x,a,b,eps,(1 << nmax),value,exactcheck,contextptr))
       return value;
     if (!romberg_method)
       *logptr(contextptr) << "Adaptive method failure, will try with Romberg, last approximation was " << value << endl;
-    // a, b and eps should be evalf-ed, and eps>0
+#endif
     gen h=b-a;
     vecteur old_line,cur_line;
 #ifdef NO_STDEXCEPT
+#ifdef BAC_OPTIONS
+    if(do_mksa)
+      old_line.push_back(evalf(remove_units(evalf(h,eval_level(contextptr),contextptr))*mksa_value(evalf((limit(f,*x._IDNTptr,a,1,contextptr)+limit(f,*x._IDNTptr,b,-1,contextptr))/2,eval_level(contextptr),contextptr),contextptr),eval_level(contextptr),contextptr));
+    else
+#endif
     old_line.push_back(evalf(h*(limit(f,*x._IDNTptr,a,1,contextptr)+limit(f,*x._IDNTptr,b,-1,contextptr))/2,eval_level(contextptr),contextptr));
 #else
     try {
@@ -4002,15 +4216,28 @@ namespace giac {
 #endif
     if (is_inf(old_line[0])|| is_undef(old_line[0]) || !lop(old_line[0],at_bounded_function).empty()){
       // FIXME middle point in arbitrary precision
+#ifndef BAC_OPTIONS
       *logptr(contextptr) << gettext("Infinity or undefined limit at bounds.\nUsing middle point Romberg method") << endl;
+#endif
       gen y=(a+b)/2;
-      gen fy=subst(f,x,y,false,contextptr);
+      gen fy=eval(subst(f,x,y,false,contextptr),eval_level(contextptr),contextptr);
+#ifdef BAC_OPTIONS
+      if(do_mksa) fy = mksa_value(evalf(fy,eval_level(contextptr),contextptr),contextptr);
+#endif
       // Workaround for undefined middle point
       if (is_undef(fy) || is_inf(fy)){
-	fy=limit(f,*x._IDNTptr,y,0,contextptr);
-	if (is_undef(fy) || is_inf(fy))
-	  return undef;
+      	fy=limit(f,*x._IDNTptr,y,0,contextptr);
+#ifdef BAC_OPTIONS
+        if(do_mksa) fy = mksa_value(evalf(fy,eval_level(contextptr),contextptr),contextptr);
+#endif
+      	if (is_undef(fy) || is_inf(fy))
+      	  return undef;
       }
+#ifdef BAC_OPTIONS
+      if(do_mksa) 
+        old_line=vecteur(1,fy*remove_units(evalf(h,eval_level(contextptr),contextptr)));
+      else
+#endif
       old_line=vecteur(1,fy*h);
       // At the i-th step of the loop compute the middle approx of the integral
       // and use old_line to compute cur_line
@@ -4018,87 +4245,141 @@ namespace giac {
       int n=3;
       h=(b-a)/3;
       for (int i=0;i<nmax;++i){
-	cur_line.clear();
-	// compute trapeze
-	gen y=a+h/2,sum;
-	if (is_exactly_zero(y-a))
-	  return old_line;
-	for (int j=0;j<n;++j){
-	  if (j%3==1){
-	    y=y+h; // skip, already computed
-	    continue;
-	  }
-	  gen fy=subst(f,x,y,false,contextptr);
-	  // Workaround if fy undefined
-	  if (is_undef(fy) || is_inf(fy)){
-	    fy=limit(f,*x._IDNTptr,y,0,contextptr);
-	    if (is_undef(fy) || is_inf(fy))
-	      return undef;
-	  }
-	  sum=sum+evalf(fy,eval_level(contextptr),contextptr);
-	  y=y+h;
-	}
-	cur_line.push_back(old_line[0]/3+sum*h); 
-	h=h/3;
-	n = 3*n ;
-	gen pui9=1;
-	for (int j=0;j<=i;++j){
-	  pui9=9*pui9;
-	  cur_line.push_back((pui9*cur_line[j]-old_line[j])/(pui9-1));
-	}
-	gen err=abs(old_line[i]-cur_line[i+1],contextptr);
-	if (i>nmax/2 && (ck_is_greater(eps,err,contextptr)
-			 || ck_is_greater(eps*abs(cur_line[i+1],contextptr),err,contextptr)) )
-	  return (old_line[i]+cur_line[i+1])/2;
-	if (i!=nmax-1)
-	  old_line=cur_line;
+      	cur_line.clear();
+      	// compute trapeze
+      	gen y=a+h/2,sum;
+      	if (is_exactly_zero(y-a)) {
+#ifdef BAC_OPTIONS
+          return apply_units(old_line,f_unit * limit_unit);
+#else
+      	  return old_line;
+#endif
+        }
+      	for (int j=0;j<n;++j){
+      	  if (j%3==1){
+      	    y=y+h; // skip, already computed
+      	    continue;
+      	  }
+      	  gen fy=eval(subst(f,x,y,false,contextptr),eval_level(contextptr),contextptr);
+#ifdef BAC_OPTIONS
+          if(do_mksa) fy = mksa_value(evalf(fy,eval_level(contextptr),contextptr),contextptr);
+#endif
+      	  // Workaround if fy undefined
+      	  if (is_undef(fy) || is_inf(fy)){
+      	    fy=limit(f,*x._IDNTptr,y,0,contextptr);
+#ifdef BAC_OPTIONS
+            if(do_mksa) fy = mksa_value(evalf(fy,eval_level(contextptr),contextptr),contextptr);
+#endif
+      	    if (is_undef(fy) || is_inf(fy))
+      	      return undef;
+      	  }
+      	  sum=sum+evalf(fy,eval_level(contextptr),contextptr);
+#ifdef BAC_OPTIONS
+      if(!is_fully_numeric(sum)) symbolic(at_integrate,makesequence(f0,x0,a_,b_));//return gensizeerr("Could not evaluate integral numerically.  Ensure all variables are defined.");
+#endif
+      	  y=y+h;
+      	}
+#ifdef BAC_OPTIONS
+        if(do_mksa) cur_line.push_back(old_line[0]/3+sum*remove_units(evalf(h,eval_level(contextptr),contextptr))); 
+        else
+#endif
+      	cur_line.push_back(old_line[0]/3+sum*h); 
+      	h=h/3;
+      	n = 3*n ;
+      	gen pui9=1;
+      	for (int j=0;j<=i;++j){
+      	  pui9=9*pui9;
+      	  cur_line.push_back((pui9*cur_line[j]-old_line[j])/(pui9-1));
+      	}
+      	gen err=abs(old_line[i]-cur_line[i+1],contextptr);
+      	if (i>nmax/2 && (ck_is_greater(eps,err,contextptr)
+      			 || ck_is_greater(eps*abs(cur_line[i+1],contextptr),err,contextptr)) ) {
+#ifdef BAC_OPTIONS
+          return apply_units((old_line[i]+cur_line[i+1])/2,f_unit * limit_unit);
+#else
+      	  return (old_line[i]+cur_line[i+1])/2;
+#endif
+        }
+      	if (i!=nmax-1)
+      	  old_line=cur_line;
       }
       if (calc_mode(contextptr)==1)
-	return undef;
+	      return undef;
       *logptr(contextptr) << gettext("Unable to find numeric integral using Romberg method, returning the last approximations") << endl;
+#ifdef BAC_OPTIONS
+      cur_line=is_undef(value)?makevecteur(apply_units(old_line.back(),f_unit * limit_unit),apply_units(cur_line.back(),f_unit * limit_unit)):makevecteur(apply_units(cur_line.back(),f_unit * limit_unit),value);
+#else
       cur_line=is_undef(value)?makevecteur(old_line.back(),cur_line.back()):makevecteur(cur_line.back(),value);
+#endif
       return cur_line;
       // return rombergo(f,x,a,b,nmax,contextptr);
     }
     int n=1;
     // At the i-th step of the loop compute the trapeze approx of the integral
     // and use old_line to compute cur_line
-    for (int i=0;i<nmax;++i){
+    for (int i=0;i<nmax;++i) {
       cur_line.clear();
       // compute trapeze
       gen y=a+h/2,sum;
-      if (is_exactly_zero(y-a))
-	return old_line;
-      for (int j=0;j<n;++j){
-	gen fy=subst(f,x,y,false,contextptr);
-	// Workaround for romberg((1-cos(x))/x^2,x,-1,1)?
-	if (is_undef(fy) || is_inf(fy)){
-	  fy=limit(f,*x._IDNTptr,y,0,contextptr);
-	  if (is_undef(fy) || is_inf(fy))
-	    return undef;
-	}
-	sum=sum+evalf(fy,eval_level(contextptr),contextptr);
-	y=y+h;
+      if (is_exactly_zero(y-a)) {
+#ifdef BAC_OPTIONS
+        return apply_units(old_line,f_unit * limit_unit);
+#else
+	      return old_line;
+#endif
+      }
+      for (int j=0;j<n;++j) {
+        gen fy=eval(subst(f,x,y,false,contextptr),eval_level(contextptr),contextptr);
+#ifdef BAC_OPTIONS
+        if(do_mksa) fy = mksa_value(evalf(fy,eval_level(contextptr),contextptr),contextptr);
+#endif
+      	// Workaround for romberg((1-cos(x))/x^2,x,-1,1)?
+      	if (is_undef(fy) || is_inf(fy)) {
+      	  fy=limit(f,*x._IDNTptr,y,0,contextptr);
+#ifdef BAC_OPTIONS
+          if(do_mksa) fy = mksa_value(evalf(fy,eval_level(contextptr),contextptr),contextptr);
+#endif
+      	  if (is_undef(fy) || is_inf(fy))
+      	    return undef;
+      	}
+      	sum=sum+evalf(fy,eval_level(contextptr),contextptr);
+#ifdef BAC_OPTIONS
+      if(!is_fully_numeric(sum)) return symbolic(at_integrate,makesequence(f0,x0,a_,b_)); //gensizeerr("Could not evaluate integral numerically.  Ensure all variables are defined.");
+#endif
+      	y=y+h;
       }
       h=h/2;
+#ifdef BAC_OPTIONS
+      if(do_mksa) cur_line.push_back(old_line[0]/2+sum*remove_units(evalf(h,eval_level(contextptr),contextptr))); 
+      else
+#endif
       cur_line.push_back(old_line[0]/2+sum*h); 
       n = 2*n ;
       gen pui4=1;
-      for (int j=0;j<=i;++j){
-	pui4=4*pui4;
-	cur_line.push_back((pui4*cur_line[j]-old_line[j])/(pui4-1));
+      for (int j=0;j<=i;++j) {
+      	pui4=4*pui4;
+      	cur_line.push_back((pui4*cur_line[j]-old_line[j])/(pui4-1));
       }
       gen err=abs(old_line[i]-cur_line[i+1],contextptr);
       if (i>nmax/2 && (ck_is_greater(eps,err,contextptr)
-		       || ck_is_greater(eps*abs(cur_line[i+1],contextptr),err,contextptr)) )
-	return (old_line[i]+cur_line[i+1])/2;
+		       || ck_is_greater(eps*abs(cur_line[i+1],contextptr),err,contextptr)) ) {
+#ifdef BAC_OPTIONS
+        return apply_units((old_line[i]+cur_line[i+1])/2,f_unit * limit_unit);
+#else
+        return (old_line[i]+cur_line[i+1])/2;
+#endif
+      }
       if (i!=nmax-1)
-	old_line=cur_line;
+      	old_line=cur_line;
     }
     if (calc_mode(contextptr)==1)
       return undef;
     *logptr(contextptr) << gettext("Unable to find numeric integral using Romberg method, returning the last approximations") << endl;
+#ifdef BAC_OPTIONS
+    cur_line=is_undef(value)?makevecteur(apply_units(old_line.back(),f_unit * limit_unit),apply_units(cur_line.back(),f_unit * limit_unit)):makevecteur(apply_units(cur_line.back(),f_unit * limit_unit),value);
+#else
     cur_line=is_undef(value)?makevecteur(old_line.back(),cur_line.back()):makevecteur(cur_line.back(),value);
+#endif
     return cur_line;
   }
   gen ggb_var(const gen & f){
@@ -4186,6 +4467,34 @@ namespace giac {
     }
     if (eps.type!=_DOUBLE_ && eps.type!=_FLOAT_ && eps.type!=_REAL)
       eps=epsilon(contextptr);
+#ifdef BAC_OPTIONS
+    if(!is_one(get_units(a)) && evalf_double(remove_units(a),1,contextptr).type==_DOUBLE_) {
+      if(!is_one(get_units(b)) && evalf_double(remove_units(b),1,contextptr).type==_DOUBLE_) {
+        // Ensure matching units:
+        if(mksa_reduce_base(a,contextptr) == mksa_reduce_base(b,contextptr)) {
+          return evalf_int(f,x,a,b,eps,n,romberg_method,contextptr,exactcheck);
+        } else {
+          std::string out = "Incompatible units: Integral lower limit has units of '";
+          out += gen2string(get_units(a)) + "' and upper limit units of '" + gen2string(get_units(b)) + "'";
+          return gensizeerr(gettext(out.data()));
+        }
+      } else if(is_zero(b)) {
+        return evalf_int(f,x,a,b,eps,n,romberg_method,contextptr,exactcheck);
+      } else if(evalf_double(b,1,contextptr).type==_DOUBLE_) {
+        std::string out = "Incompatible units: Integral lower limit has units of '";
+        out += gen2string(get_units(a)) + "' but upper limit has no units.";
+        return gensizeerr(gettext(out.data()));
+      }
+    } else if(!is_one(get_units(b)) && evalf_double(remove_units(b),1,contextptr).type==_DOUBLE_) {
+      if(is_zero(a)) {
+        return evalf_int(f,x,a,b,eps,n,romberg_method,contextptr,exactcheck);
+      } else if(evalf_double(a,1,contextptr).type==_DOUBLE_) {
+        std::string out = "Incompatible units: Integral lower limit has no units but upper limit has units of '";
+        out += gen2string(get_units(b)) + "'";
+        return gensizeerr(gettext(out.data()));
+      }
+    }
+#endif
     if ( x.type!=_IDNT || 
 	 (a.type!=_DOUBLE_ && a.type!=_REAL) 
 	 || (b.type!=_DOUBLE_ && b.type!=_REAL) 
@@ -5483,19 +5792,99 @@ namespace giac {
   // returns by default y[t1] or a vector of [t,y[t]]
   // if return_curve is true stop as soon as y is outside ymin,ymax
   // f is eitheir a prog (t,y) -> f(t,y) or a _VECT [f(t,y) t y]
-  gen odesolve(const gen & t0orig,const gen & t1orig,const gen & f,const gen & y0orig,double tstep,bool return_curve,double * ymin,double * ymax,int maxstep,GIAC_CONTEXT){
-    bool iscomplex=false; 
-    // switch to false if GSL is installed or true to force using giac code for real ode
+#ifdef BAC_OPTIONS
+  vecteur apply_units(const vecteur & v, const int dim, const vecteur & y_unit, const gen & t_unit) {
+    vecteur res;
+    res.reserve(dim+1);
+    for (int i=0;i<dim;++i)
+      res.push_back(apply_units(v[i], y_unit[i]));
+    res.push_back(apply_units(v[dim], t_unit));
+    return res;
+  }
+  vecteur apply_units(const vecteur & v, const int dim, const gen & y_unit, const gen & t_unit) {
+    if(y_unit.type == _VECT) return apply_units(v,dim,*y_unit._VECTptr,t_unit);
+    vecteur res;
+    res.reserve(2);
+    res.push_back(apply_units(v[0], y_unit));
+    res.push_back(apply_units(v[1], t_unit));
+    return res;
+  }
+  vecteur apply_units(const vecteur & v, const gen & u) {
+    if(int(v.size())==1) return apply_units(v, makevecteur(u));
+    if((u.type == _VECT) && (int(v.size()) == int(u._VECTptr->size()))) return apply_units(v, *u._VECTptr);
+    return gen2vecteur(gensizeerr("unit vecteur mismatch...shouldnt happen!"));
+  }
+  vecteur apply_units(const vecteur & v, const gen & u, const vecteur & o) {
+    if(int(v.size())!=int(o.size())) return gen2vecteur(gensizeerr("unit vecteur mismatch...shouldnt happen!"));
+    vecteur v_adjusted;
+    v_adjusted.reserve(int(v.size()));
+    for(int i = 0; i < int(v.size()); i++)
+      v_adjusted.push_back(v[i] + o[i]);
+    return apply_units(v_adjusted, u);
+  }
+  gen apply_units(const gen & g, const gen & u, const gen & o) {
+    return apply_units(g+o,u);
+  }
+  vecteur apply_final_units(const vecteur & a,const vecteur & m,const vecteur & u,const vecteur & o) {
+    const_iterateur at=a.begin(),atend=a.end(), mt=m.begin(),mtend=m.end(), ut=u.begin(),utend=u.end(), ot=o.begin(),otend=o.end();
+    vecteur vout;
+    vout.reserve(atend-at);
+    for (;at!=atend;++at,++mt,++ut,++ot){
+      gen tmp=apply_final_units(*at,*mt,*ut,*ot);
+      vout.push_back(tmp);
+    }
+    return vout;
+  }
+  vecteur apply_final_units(const vecteur & a,const gen & m,const gen & u,const vecteur & o) {
+    if(m.type == _VECT) return apply_final_units(a,*m._VECTptr,*u._VECTptr,o);
+    vecteur vout;
+    vout.reserve(1);
+    vout.push_back(apply_final_units(a.front(),m,u,o.front()));
+    return vout;
+  }
+  gen odesolve(const gen & t0orig,const gen & t1orig,const gen & f,const gen & y0orig,gen & tstep_in,bool tstep_passed,bool return_curve,double * ymin,double * ymax,int maxstep,GIAC_CONTEXT){ 
+#else
+  gen odesolve(const gen & t0orig,const gen & t1orig,const gen & f,const gen & y0orig,const gen & tstep_in,bool return_curve,double * ymin,double * ymax,int maxstep,GIAC_CONTEXT){ 
+  double tstep;
+  if(tstep_in.type == _DOUBLE_) tstep = tstep_in._DOUBLE_val;
+  else tstep = 0;
+#endif
+#ifdef BAC_OPTIONS
+    gen t0_e = t0orig.evalf(1,contextptr);
+    gen t_unit = get_units(t0_e);
+    if(is_zero(t0_e)) 
+      t_unit = get_units(t1orig.evalf(1,contextptr));
+    gen y0 = y0orig.evalf(1,contextptr);
+    gen y_unit = get_units(y0);
+    t0_e = remove_units(evalf_double(t0_e,1,contextptr));
+    y0 = remove_units(evalf_double(y0,1,contextptr));
+    gen t1_e = t1orig.evalf(1,contextptr);
+    t1_e = _usimplify_base(t1_e/symbolic(at_unit,makevecteur(plus_one,t_unit)),contextptr); // Convert end time to same units as start time and drop the unit
+    t1_e = evalf_double(t1_e,1,contextptr);
+    if(t1_e.type!=_DOUBLE_ && t1_e.type!=_CPLX) return gensizeerr("Start and end points must have matching units.");
+    if(is_zero(tstep_in)) {
+      tstep_in = (t1_e - t0_e)/30; // By definition this is same units as t1_e,t0_e!
+    } else {
+      tstep_in = _usimplify_base(tstep_in/symbolic(at_unit,makevecteur(plus_one,t_unit)),contextptr); // Convert time step to same units as start time and drop the unit
+      tstep_in = evalf_double(tstep_in,1,contextptr);
+      if(tstep_in.type!=_DOUBLE_ && tstep_in.type!=_CPLX) return gensizeerr("Start and end points must have matching units.");
+    }
+    double tstep = tstep_in._DOUBLE_val;
+#else
     gen t0_e=evalf_double(t0orig.evalf(1,contextptr),1,contextptr);
     gen t1_e=evalf_double(t1orig.evalf(1,contextptr),1,contextptr);
+    gen y0=evalf_double(y0orig.evalf(1,contextptr),1,contextptr);
+#endif
+    bool iscomplex=false; 
+    // switch to false if GSL is installed or true to force using giac code for real ode
     // Now accept t0 and t1 complex!
     if ( (t0_e.type!=_DOUBLE_ && t0_e.type!=_CPLX)|| (t1_e.type!=_DOUBLE_ && t1_e.type!=_CPLX))
       return gensizeerr(contextptr);
-    gen y0=evalf_double(y0orig.evalf(1,contextptr),1,contextptr);
     if (y0.type!=_VECT)
       y0=vecteur(1,y0);
     vecteur y0v=*y0._VECTptr;
     int dim=int(y0v.size());
+#ifndef BAC_OPTIONS
     if (tstep==0){
       if (dim==2)
 	tstep=(gnuplot_xmax-gnuplot_xmin)/100;
@@ -5508,6 +5897,7 @@ namespace giac {
     }
     if (tstep>abs(t1_e-t0_e,contextptr)._DOUBLE_val)
       tstep=abs(t1_e-t0_e,contextptr)._DOUBLE_val;
+#endif
 #if 1
     ALLOCA(double, y, dim*sizeof(double));// double * y =(double *)alloca(dim*sizeof(double));
 #else
@@ -5546,8 +5936,15 @@ namespace giac {
       tmp=f(gen(makevecteur(t_id,yv),_SEQ__VECT),contextptr);
     }
     vecteur resv; // contains the curve
+#ifdef BAC_OPTIONS
+    if (return_curve) 
+      resv.push_back(mergevecteur(makevecteur(apply_units(t0_e,t_unit)),apply_units(y0v,y_unit)));
+    gen last_t_e = t0_e;
+    int tot_size = 0;
+#else
     if (return_curve)
       resv.push_back(makevecteur(t0_e,y0v));
+#endif
 #if 0 //def HAVE_LIBGSL
     if (!iscomplex && t0_e.type==_DOUBLE_ && t1_e.type==_DOUBLE_ && is_zero(im(tmp,contextptr))){
       double t0=t0_e._DOUBLE_val;
@@ -5670,8 +6067,61 @@ namespace giac {
      */
     gen tolerance=epsilon(contextptr)>1e-12?epsilon(contextptr):1e-12;
     vecteur yt(dim+1),ytvar(yv);
+#ifdef BAC_OPTIONS
+    // If expected units are in temp units, we have to fix that by converting to absolute scale first
+    vecteur offset_y;
+    offset_y.reserve(dim);
+    gen offset_t = zero;
+    gen t_unit_orig = t_unit;
+    gen y_unit_orig = y_unit;
+    if(y_unit.type == _VECT) {
+      for (int i=0;i<dim;++i) {
+        if((*y_unit._VECTptr)[i] == _degF_unit) {
+          (*y_unit._VECTptr)[i] = _Rankine_unit;
+          yt[i] = y0v[i] + 459.67;
+          offset_y.push_back(gen(-459.67));
+        } else if((*y_unit._VECTptr)[i] == _degC_unit) {
+          (*y_unit._VECTptr)[i] = _K_unit;
+          yt[i] = y0v[i] + 273.15;
+          offset_y.push_back(gen(-273.15));
+        } else {
+          yt[i]=y0v[i];
+          offset_y.push_back(zero);
+        }
+      }
+    } else {
+      if(y_unit == _degF_unit) {
+        y_unit = _Rankine_unit;
+        yt[0] = y0v[0] + 459.67;
+        offset_y.push_back(gen(-459.67));
+      } else if(y_unit == _degC_unit) {
+        y_unit = _K_unit;
+        yt[0] = y0v[0] + 273.15;
+        offset_y.push_back(gen(-273.15));
+      } else {
+        yt[0]=y0v[0];
+        offset_y.push_back(zero);
+      }
+    }
+    if(t_unit == _degF_unit) {
+      t_unit = _Rankine_unit;
+      t0_e = t0_e + 459.67;
+      t1_e = t1_e + 459.67;
+      offset_t = gen(-459.67);
+    } else if(t_unit == _degC_unit) {
+      t_unit = _K_unit;
+      t0_e = t0_e + 273.15;
+      t1_e = t1_e + 273.15;
+      offset_t = gen(-273.15);
+    }
+    bool do_mksa = false;
+    if(_usimplify_hits_temperature(evalf(eval(gen(odesolve_f),eval_level(contextptr),contextptr),1,contextptr),contextptr)) 
+      do_mksa = true;
+    double tstep_initial = tstep;
+#else
     for (int i=0;i<dim;++i)
       yt[i]=y0v[i];
+#endif
     gen t_e(t0_e);
     yt[dim]=t_e;
     vecteur yt1(dim+1);
@@ -5690,16 +6140,68 @@ namespace giac {
     vecteur butcher_k(7);
     for (int i=0;i<7;++i)
       butcher_k[i]=vecteur(dim);
+#ifdef BAC_OPTIONS
+    vecteur firsteval,lasteval;
+    vecteur ytu;
+    ytu.reserve(dim+1);
+    for (int i=0;i<=dim;++i) {
+      if(is_zero(yt[i]))
+        ytu.push_back(gen(0.00000656434)); // random non-zero to test units
+      else
+        ytu.push_back(yt[i]);
+    }
+
+    // Unit consistency check: functions should be of units y_unit/t_unit
+    firsteval = get_units(subst(odesolve_f,ytvar,apply_units(ytu,dim,y_unit,t_unit),false,contextptr));
+    for (int i=0;i<dim;++i) {
+      if(is_undef(firsteval[i])) {
+        std::string out = "Mismatched units in expression ";
+        out += gen2string(ytvar[i]) + ". The function returned a unit mismatch error when attempting to plug in the first value of " + gen2string(t_id) + ".  Please double check the expression to ensure unit consistency.";
+        return gensizeerr(gettext(out.data()));
+      }
+      // Find conversion factor: if timestep is in 's' and unit in 'm', but deriv function is in/hr, for example, need to convert over.
+      gen factor = evalf_double(_usimplify_base(symbolic(at_unit, makevecteur(plus_one, firsteval[i] * t_unit / (y_unit.type==_VECT ? (*y_unit._VECTptr)[i] : y_unit))),contextptr),1,contextptr);
+      if(factor.type!=_DOUBLE_ && factor.type!=_CPLX) {
+        std::string out = "Mistmatched units in expression ";
+        out += gen2string(ytvar[i]) + ". The function returned units of ";
+        out += gen2string(_usimplify_base(symbolic(at_unit, makevecteur(plus_one, firsteval[i])),contextptr)) + ", however units of " + gen2string(_usimplify_base(symbolic(at_unit, makevecteur(plus_one, (y_unit.type==_VECT ? (*y_unit._VECTptr)[i] : y_unit)/t_unit)),contextptr)) + " were expected.";
+        return gensizeerr(gettext(out.data()));
+      } else if(do_mksa)
+        odesolve_f[i] = odesolve_f[i] * factor; // Add in conversion factor to the expression
+    }
+
+    if(!do_mksa) {// Do unit simplifications upfront:
+      odesolve_f = mksa_value(odesolve_f, contextptr);
+      t0_e =  mksa_value(symbolic(at_unit,makevecteur(t0_e,t_unit)), contextptr);
+      last_t_e = t0_e;
+      t1_e =  mksa_value(symbolic(at_unit,makevecteur(t1_e,t_unit)), contextptr);
+      tstep = mksa_value(symbolic(at_unit,makevecteur(tstep,t_unit)), contextptr)._DOUBLE_val;
+      tstep_initial = tstep;
+      t_unit = get_units(mksa_reduce_base(symbolic(at_unit,makevecteur(plus_one,t_unit)), contextptr));
+      yt = mksa_value(apply_units(yt,dim,y_unit,t_unit),contextptr);
+      if(y_unit.type == _VECT) {
+        for (int i=0;i<dim;++i) 
+          (*y_unit._VECTptr)[i] = get_units(mksa_reduce_base(symbolic(at_unit,makevecteur(plus_one,(*y_unit._VECTptr)[i])), contextptr));
+      } else
+        y_unit = get_units(mksa_reduce_base(symbolic(at_unit,makevecteur(plus_one,y_unit)), contextptr));
+      firsteval=subst(odesolve_f,ytvar,yt,false,contextptr);
+    } else
+      firsteval=remove_units(subst(odesolve_f,ytvar,apply_units(yt,dim,y_unit,t_unit),false,contextptr));
+    gen direction=t1_e-t0_e;
+    double temps_total=(abs(direction,contextptr) - tolerance)._DOUBLE_val,temps=0;
+    direction=direction/temps_total;
+#else
     vecteur firsteval=subst(odesolve_f,ytvar,yt,false,contextptr),lasteval;
     gen direction=t1_e-t0_e;
     double temps_total=abs(direction,contextptr)._DOUBLE_val,temps=0;
     direction=direction/temps_total;
+#endif
     for (int nstep=0;do_while && nstep<maxstep && temps<temps_total;++nstep) {
       gen dt=tstep*direction;
       // compute next step
       vecteur & bk0=*butcher_k[0]._VECTptr;
       bk0=firsteval;
-      if (is_undef(bk0))
+      if (is_undef(bk0)) 
 	return bk0;
       multvecteur(dt,bk0,bk0);
       int butcher_a_shift=0;
@@ -5727,11 +6229,25 @@ namespace giac {
 	yt1[dim]=yt[dim];
 	type_operator_plus_times(butcher_c[j],dt,yt1[dim]);
 	vecteur & bkj = *butcher_k[j]._VECTptr;
-	if (j<6)
-	  bkj=subst(odesolve_f,ytvar,yt1,false,contextptr);
-	else
-	  bkj=lasteval=subst(odesolve_f,ytvar,yt1,false,contextptr);
-	if (is_undef(bkj))
+#ifdef BAC_OPTIONS
+  if(do_mksa) {
+  	if (j<6)
+  	  bkj=remove_units(subst(odesolve_f,ytvar,apply_units(yt1,dim,y_unit,t_unit),false,contextptr));
+  	else
+  	  bkj=lasteval=remove_units(subst(odesolve_f,ytvar,apply_units(yt1,dim,y_unit,t_unit),false,contextptr));
+  } else {
+    if (j<6)
+      bkj=subst(odesolve_f,ytvar,yt1,false,contextptr);
+    else
+      bkj=lasteval=subst(odesolve_f,ytvar,yt1,false,contextptr);
+  }
+#else
+        if (j<6)
+          bkj=subst(odesolve_f,ytvar,yt1,false,contextptr);
+        else
+          bkj=lasteval=subst(odesolve_f,ytvar,yt1,false,contextptr);
+#endif
+	if (is_undef(bkj)) 
 	  return bkj;
 	multvecteur(dt,bkj,bkj);
       }
@@ -5751,13 +6267,15 @@ namespace giac {
       // accept or reject current step and compute dt
       double err=rk_error(y_final4,y_final5,yt,contextptr);
       gen hopt=.9*tstep*pow(tolerance/err,.2,contextptr);
-      if (err==0 || is_undef(hopt))
+#ifndef BAC_OPTIONS
+      if (err==0 || is_undef(hopt)) 
 	break;
+#endif
       if (debug_infolevel>5)
 	CERR << nstep << ":" << t_e << ",y5=" << y_final5 << ",y4=" << y_final4 << " " << tstep << " hopt=" << hopt << " err=" << err << endl;
       if (is_strictly_greater(err,tolerance,contextptr)){
 	// reject step
-	tstep=hopt._DOUBLE_val;
+        tstep=hopt._DOUBLE_val;
       }
       else { // accept
 	swap(firsteval,lasteval);
@@ -5765,17 +6283,37 @@ namespace giac {
 	  yt[i]=y_final5[i];
 	t_e += dt;
 	yt[dim]=t_e;
-	temps += tstep;
-	tstep=abs(t1_e-t_e,contextptr)._DOUBLE_val;
-	if (hopt._DOUBLE_val<tstep)
-	  tstep=hopt._DOUBLE_val;
-	if (return_curve)
-	  resv.push_back(makevecteur(t_e,y_final5));
+	temps = temps + tstep;
+#ifdef BAC_OPTIONS
+        tstep=abs(t1_e-t_e,contextptr)._DOUBLE_val;
+        if (!is_inf(hopt) && tstep>hopt._DOUBLE_val)
+          tstep=hopt._DOUBLE_val;
+        if(return_curve && tstep_passed && ((nstep+1) >= maxstep) && (maxstep < 50000) && (tot_size < 1000)) maxstep += 1;
+        if(return_curve && tstep_passed && !is_greater(tstep_initial-tolerance, abs(t_e - last_t_e,contextptr),contextptr)) {
+          if(do_mksa)
+            resv.push_back(mergevecteur(makevecteur(apply_units(t_e,t_unit_orig,offset_t)),apply_units(y_final5,y_unit_orig,offset_y)));
+          else
+            resv.push_back(mergevecteur(makevecteur(apply_final_units(t_e,t_unit,t_unit_orig,offset_t)),apply_final_units(y_final5,y_unit,y_unit_orig,offset_y)));
+          last_t_e = t_e;
+          tot_size++;
+        } else if (return_curve && !tstep_passed && do_mksa)
+          resv.push_back(mergevecteur(makevecteur(apply_units(t_e,t_unit_orig,offset_t)),apply_units(y_final5,y_unit_orig,offset_y)));
+        else if (return_curve && !tstep_passed)
+          resv.push_back(mergevecteur(makevecteur(apply_final_units(t_e,t_unit,t_unit_orig,offset_t)),apply_final_units(y_final5,y_unit,y_unit_orig,offset_y)));
+        if(tstep_passed && is_greater(t_e + tstep, last_t_e + tstep_initial,contextptr)) 
+          tstep = abs(last_t_e + tstep_initial - t_e,contextptr)._DOUBLE_val;
+#else
+        tstep=abs(t1_e-t_e,contextptr)._DOUBLE_val;
+        if (hopt._DOUBLE_val<tstep)
+          tstep=hopt._DOUBLE_val;
+        if (return_curve)
+          resv.push_back(makevecteur(t_e,y_final5));
+#endif
 	if (!iscomplex){
 	  // check boundaries for y_final5
 	  for (int i=0;i<dim;++i){
 	    // CERR << y[i] << endl;
-	    if ( ymin && ymax && ( y_final5[i]._DOUBLE_val< ymin[i] || y_final5[i]._DOUBLE_val>ymax[i]) )
+	    if ( ymin && ymax && ( y_final5[i]._DOUBLE_val< ymin[i] || y_final5[i]._DOUBLE_val>ymax[i]) ) 
 	      do_while=false;
 	  }
 	}
@@ -5785,7 +6323,14 @@ namespace giac {
       return resv;
     else {
       if (t_e!=t1_e)
-	return makevecteur(t_e,y_final5);
+#ifdef BAC_OPTIONS
+      if(do_mksa)
+        return mergevecteur(makevecteur(apply_units(t_e,t_unit_orig,offset_t)),apply_units(y_final5,y_unit_orig,offset_y));
+      else
+        return mergevecteur(makevecteur(apply_final_units(t_e,t_unit,t_unit_orig,offset_t)),apply_final_units(y_final5,y_unit,y_unit_orig,offset_y));
+#else
+        return makevecteur(t_e,y_final5);
+#endif
       return y_final5;
     }    
   }
@@ -5799,6 +6344,7 @@ namespace giac {
   static gen odesolve(const vecteur & w,GIAC_CONTEXT){
     vecteur v(w);
     int vs=int(v.size());
+    bool tstep_defined = false;
     if (vs<3)
       return gendimerr(contextptr);
     // convert expression,[t,vars],[t0,init_values],t1
@@ -5816,7 +6362,11 @@ namespace giac {
       v[3]=newv3;
     }
     int maxstep=1000,vstart=0;
-    double tstep=0;
+#ifdef BAC_OPTIONS
+    gen tstep=zero;
+#else
+    double tstep = 0;
+#endif
     if ( t0t.is_symb_of_sommet(at_interval)){ // functional form
       t0=t0t._SYMBptr->feuille._VECTptr->front(); 
       t1=t0t._SYMBptr->feuille._VECTptr->back(); 
@@ -5830,20 +6380,37 @@ namespace giac {
       y0=v[3];
       gen t=readvar(v[1]);
       f=makevecteur(v[0],t,v[2]);
-      bool tminmax_defined,tstep_defined;
-      double tmin(-1e300),tmax(1e300);
+      bool tminmax_defined;
       vstart=1;
+#ifdef BAC_OPTIONS
+      gen tmin(-1e300),tmax(1e300);
+      genread_tmintmaxtstep(v,t,vstart,tmin,tmax,tstep,tminmax_defined,tstep_defined,contextptr);
+      if (t0==t1) {
+        if (tmin>tmax) {
+          *logptr(contextptr) << gettext("Warning time reversal") << endl;
+          t1=tmin;
+          t0=tmax;
+        } else {
+          t0=tmin;
+          t1=tmax;
+        }
+        if(is_greater(zero,tstep,contextptr))
+          tstep = -1*tstep;
+      }
+#else
+      double tmin(-1e300),tmax(1e300);
       read_tmintmaxtstep(v,t,vstart,tmin,tmax,tstep,tminmax_defined,tstep_defined,contextptr);
       if (t0!=t1){
-	if (tstep==0)
-	  tstep=evalf_double(abs(t1-t0,contextptr),1,contextptr)._DOUBLE_val/30;
+	  if (tstep==0)
+	    tstep=evalf_double(abs(t1-t0,contextptr),1,contextptr)._DOUBLE_val/30;
       }
       else {
-	if (tmin>0 || tmax<0 || tmin>tmax || tstep<=0)
-	  *logptr(contextptr) << gettext("Warning time reversal") << endl;
-	t0=tmin;
-	t1=tmax;
+	  if (tmin>0 || tmax<0 || tmin>tmax || tstep<=0)
+	    *logptr(contextptr) << gettext("Warning time reversal") << endl;
+	  t0=tmin;
+	  t1=tmax;
       }
+#endif
       // if (tminmax_defined && tstep_defined) maxstep=2*int((tmax-tmin)/tstep)+1;
       // commented since the real step is used is smaller than tstep most of the time!
       vstart=3;
@@ -5872,7 +6439,11 @@ namespace giac {
       if (v[i]==at_curve)
 	curve=true;
     }
+#ifdef BAC_OPTIONS
+    return odesolve(t0,t1,f,y0,tstep,tstep_defined,curve,ymin,ymax,maxstep,contextptr);
+#else
     return odesolve(t0,t1,f,y0,tstep,curve,ymin,ymax,maxstep,contextptr);
+#endif
   }
   // odesolve(t0..t1,f,y0) or odesolve(f(t,y),t,y,t0,y0,t1)
   gen _odesolve(const gen & args,GIAC_CONTEXT) {
@@ -5880,7 +6451,14 @@ namespace giac {
     if ( (args.type!=_VECT) || (args._VECTptr->size()<3 ) )
       return symbolic(at_odesolve,args);
     vecteur v(*args._VECTptr);
+#ifdef BAC_OPTIONS
+    remove_angle_mode(true);
+    gen res = odesolve(v,contextptr);
+    remove_angle_mode(false);
+    return res;
+#else
     return odesolve(v,contextptr);
+#endif
   }
   static const char _odesolve_s []="odesolve";
   static define_unary_function_eval (__odesolve,&_odesolve,_odesolve_s);

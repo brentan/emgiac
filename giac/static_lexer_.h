@@ -290,6 +290,7 @@
 *((size_t *) at_assign),
 *((size_t *) at_assume),
 *((size_t *) at_atan),
+*((size_t *) at_atan2),
 *((size_t *) at_atan2acos),
 *((size_t *) at_atan2asin),
 *((size_t *) at_atanh),
@@ -333,7 +334,9 @@
 *((size_t *) at_cap),
 *((size_t *) at_cas_setup),
 *((size_t *) at_cat),
-*((size_t *) at_cd),
+#ifndef BAC_OPTIONS
+  *((size_t *) at_cd),
+#endif
 *((size_t *) at_ceil),
 *((size_t *) at_ceiling),
 *((size_t *) at_cell),
@@ -355,6 +358,7 @@
 *((size_t *) at_circle),
 *((size_t *) at_circumcircle),
 *((size_t *) at_classes),
+*((size_t *) at_clear_usual_units),
 *((size_t *) at_click),
 *((size_t *) at_close),
 *((size_t *) at_coeff),
@@ -430,6 +434,12 @@
 *((size_t *) at_debug_infolevel),
 *((size_t *) at_debut_enregistrement),
 *((size_t *) at_decrement),
+#ifdef BAC_OPTIONS
+  *((size_t *) at_default_base),
+  *((size_t *) at_default_units),
+  *((size_t *) at_default_units_coefficient),
+  *((size_t *) at_default_units_offset),
+#endif
 *((size_t *) at_degree),
 *((size_t *) at_delcols),
 *((size_t *) at_delrows),
@@ -544,6 +554,9 @@
 *((size_t *) at_filled),
 *((size_t *) at_fin_enregistrement),
 *((size_t *) at_findhelp),
+#ifdef BAC_OPTIONS
+  *((size_t *) at_first_index),
+#endif
 *((size_t *) at_fisher),
 *((size_t *) at_fisher_cdf),
 *((size_t *) at_fisher_icdf),
@@ -793,6 +806,13 @@
 *((size_t *) at_min),
 *((size_t *) at_mkisom),
 *((size_t *) at_mksa),
+#ifdef BAC_OPTIONS
+  *((size_t *) at_mksa_base),
+  *((size_t *) at_mksa_base_first),
+  *((size_t *) at_mksa_coefficient),
+  *((size_t *) at_mksa_offset),
+  *((size_t *) at_mksa_remove),
+#endif
 *((size_t *) at_modgcd),
 *((size_t *) at_modgcd_cachesize),
 *((size_t *) at_modp),
@@ -806,6 +826,7 @@
 *((size_t *) at_mult_c_conjugate),
 *((size_t *) at_mult_conjugate),
 *((size_t *) at_multcrement),
+*((size_t *) at_multi_regression),
 *((size_t *) at_multiplier_conjugue),
 *((size_t *) at_multiplier_conjugue_complexe),
 *((size_t *) at_multiply),
@@ -844,6 +865,9 @@
 *((size_t *) at_odd),
 *((size_t *) at_odeplot),
 *((size_t *) at_odesolve),
+#ifdef BAC_OPTIONS
+  *((size_t *) at_one_index),
+#endif
 *((size_t *) at_op),
 *((size_t *) at_open),
 *((size_t *) at_open_polygon),
@@ -1069,6 +1093,9 @@
 *((size_t *) at_seqplot),
 *((size_t *) at_seqsolve),
 *((size_t *) at_series),
+#ifdef BAC_OPTIONS
+	*((size_t *) at_set_units),
+#endif
 *((size_t *) at_shift),
 *((size_t *) at_shift_phase),
 *((size_t *) at_show_language),
@@ -1191,8 +1218,14 @@
 *((size_t *) at_unarchive),
 *((size_t *) at_unarchive_ti),
 *((size_t *) at_unitV),
+#ifdef BAC_OPTIONS
+  *((size_t *) at_unit_remove),
+#endif
 *((size_t *) at_unquote),
 *((size_t *) at_usimplify),
+#ifdef BAC_OPTIONS
+*((size_t *) at_usimplify_base),
+#endif
 *((size_t *) at_valuation),
 *((size_t *) at_vandermonde),
 *((size_t *) at_variance),

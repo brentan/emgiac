@@ -3136,7 +3136,6 @@ namespace giac {
     multvecteurmat(a,b,res);
     return res;
   }
-
   gen ckmultmatvecteur(const vecteur & a,const vecteur & b,GIAC_CONTEXT){
     if (ckmatrix(a)){
       if (ckmatrix(b)){
@@ -3151,6 +3150,12 @@ namespace giac {
       }
       // matrice * vecteur
       vecteur res;
+#ifdef BAC_OPTIONS
+      if (a.front()._VECTptr->size()==1) // [[1],[2]] * [1,2,3,4,5] -> Treat as matrix multiplication
+        return ckmultmatvecteur(a,vecteur2matrice(b),contextptr);
+        // NEED TO TURN 'B' INTO MATRIX AND RETURN MULTIPLICATION...CREATE VEC2MAT FUNCTION??
+        // ALSO NEED TO FIX nrows and ncols that is used in gen.cc operator_times, as that make this think it is different as well.
+#endif
       if (a.front()._VECTptr->size()!=b.size())
 	return gendimerr(gettext("dotvecteur"));
       multmatvecteur(a,b,res);
@@ -3169,6 +3174,16 @@ namespace giac {
   // *********************
   // ***   Matrices    ***
   // *********************
+
+#ifdef BAC_OPTIONS
+  vecteur vecteur2matrice(const vecteur & a) {
+    if(ckmatrix(a)) return a; // Already a matrix
+    matrice res;
+    res.reserve(1);
+    res.push_back(a);
+    return res;
+  }
+#endif
 
   bool ckmatrix(const matrice & a,bool allow_embedded_vect){
     vecteur::const_iterator it=a.begin(),itend=a.end();
@@ -3252,10 +3267,16 @@ namespace giac {
   }
 
   int mrows(const matrice & a){
+#ifdef BAC_OPTIONS // vecteur check
+    if(!ckmatrix(a)) return 1;
+#endif
     return int(a.size());
   }
 
   int mcols(const matrice & a){
+#ifdef BAC_OPTIONS // vecteur check
+    if(!ckmatrix(a)) return int(a.size());
+#endif
     return int(a.begin()->_VECTptr->size());
   }
 
@@ -14784,7 +14805,7 @@ namespace giac {
     int s=p->size;
     vecteur res(s);
     for (int i=0;i<s;++i)
-      res[i]=(int)gsl_permutation_get(p,i)+(xcas_mode(contextptr)?1:0);
+      res[i]=(int)gsl_permutation_get(p,i)+(one_indexed() || xcas_mode(contextptr)?1:0);
     return res;
   }
 #endif // HAVE_LIBGSL
